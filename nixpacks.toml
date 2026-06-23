@@ -1,0 +1,4 @@
+# Install devDependencies during the build phase so `prisma generate` (prisma is a
+# devDependency) runs. Without --include=dev, NODE_ENV=production makes npm omit them.
+[phases.install]
+cmds = ["npm ci --include=dev"]

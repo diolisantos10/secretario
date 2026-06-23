@@ -1,0 +1,190 @@
+/**
+ * O cérebro: laço agêntico sobre a Messages API do Claude.
+ *
+ * Modelo: claude-opus-4-8 · thinking adaptativo · effort configurável ·
+ * prompt caching no system · busca na web (web_search_20260209) + ferramentas custom.
+ * O contexto dinâmico (data, memória, lembretes, agenda) entra como mensagem de
+ * sistema no meio da conversa (recurso do Opus 4.8) — com fallback para modelos
+ * que não suportam.
+ */
+import Anthropic from "@anthropic-ai/sdk";
+import { config, anthropicReady } from "../config";
+import { log } from "../logger";
+import { SYSTEM_PROMPT, buildDynamicContext } from "./prompt";
+import { toolDefs, executeTool } from "./tools";
+import { prisma } from "../db";
+import { loadHistory, type ChatTurn } from "../services/conversation";
+import { loadFacts, formatFacts } from "../services/memory";
+import { listReminders, formatReminders } from "../services/reminders";
+import { listToday, isConnected as calendarConnected } from "../services/calendar";
+
+const MAX_ITERATIONS = 8;
+
+let client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!anthropicReady()) throw new Error("Claude não configurado — defina ANTHROPIC_API_KEY.");
+  if (!client) client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+  return client;
+}
+
+function webSearchTool() {
+  return config.ENABLE_WEB_SEARCH ? [{ type: "web_search_20260209", name: "web_search" }] : [];
+}
+
+function extractText(content: any[]): string {
+  return content
+    .filter((b) => b?.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+}
+
+async function logUsage(msg: any): Promise<void> {
+  try {
+    const u = msg?.usage ?? {};
+    await prisma.aiLog.create({
+      data: {
+        model: msg?.model ?? config.ANTHROPIC_MODEL,
+        inputTokens: u.input_tokens ?? 0,
+        outputTokens: u.output_tokens ?? 0,
+        cacheReadTokens: u.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+      },
+    });
+  } catch (e) {
+    log.debug("[secretary] logUsage falhou", e);
+  }
+}
+
+/** Monta o array de mensagens. Garante início em 'user' e injeta o contexto. */
+function buildMessages(history: ChatTurn[], contextText: string, systemAsMessage: boolean): any[] {
+  let hist = history.slice();
+  while (hist.length && hist[0].role !== "user") hist = hist.slice(1);
+
+  const messages: any[] = hist.map((t) => ({ role: t.role, content: t.content }));
+
+  if (systemAsMessage) {
+    messages.push({ role: "system", content: contextText });
+  } else {
+    // Fallback: anexa o contexto ao último turno do usuário.
+    const last = messages[messages.length - 1];
+    if (last && last.role === "user") {
+      last.content = `${last.content}\n\n<contexto>\n${contextText}\n</contexto>`;
+    } else {
+      messages.push({ role: "user", content: `<contexto>\n${contextText}\n</contexto>` });
+    }
+  }
+  return messages;
+}
+
+async function gatherContext(): Promise<string> {
+  const [facts, reminders] = await Promise.all([loadFacts(), listReminders()]);
+  let agenda = "(agenda do Google não conectada)";
+  try {
+    if (await calendarConnected()) {
+      const events = await listToday();
+      agenda = events.length
+        ? events.map((e) => `• ${e.start} → ${e.summary}`).join("\n")
+        : "(sem eventos hoje)";
+    }
+  } catch (e) {
+    log.debug("[secretary] agenda indisponível", e);
+  }
+  return buildDynamicContext({
+    memory: formatFacts(facts),
+    reminders: formatReminders(reminders),
+    agenda,
+  });
+}
+
+function baseParams(messages: any[]) {
+  return {
+    model: config.ANTHROPIC_MODEL,
+    max_tokens: 8000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: config.ANTHROPIC_EFFORT },
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+    tools: [...toolDefs, ...webSearchTool()],
+    messages,
+  };
+}
+
+/**
+ * Processa a conversa atual (histórico já inclui a última mensagem do dono) e
+ * devolve o texto da resposta. Persistir/enviar é responsabilidade de quem chama.
+ */
+export async function respond(): Promise<string> {
+  const c = getClient();
+  const history = await loadHistory();
+  const contextText = await gatherContext();
+
+  let systemAsMessage = config.ANTHROPIC_MODEL.includes("opus-4-8");
+  let messages = buildMessages(history, contextText, systemAsMessage);
+
+  let finalText = "";
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    let msg: any;
+    try {
+      const stream = c.messages.stream(baseParams(messages) as any);
+      msg = await stream.finalMessage();
+    } catch (e) {
+      // Modelo não suporta mensagem de sistema no meio? Refaz com fallback, uma vez.
+      if (systemAsMessage && e instanceof Anthropic.BadRequestError && /system/i.test(e.message)) {
+        log.warn("[secretary] modelo sem system mid-conversation — usando fallback de contexto");
+        systemAsMessage = false;
+        messages = buildMessages(history, contextText, false);
+        i--;
+        continue;
+      }
+      throw e;
+    }
+
+    await logUsage(msg);
+    messages.push({ role: "assistant", content: msg.content });
+
+    if (msg.stop_reason === "pause_turn") continue; // ferramenta de servidor (web search) — retoma
+    if (msg.stop_reason === "refusal") {
+      finalText = "Desculpa, isso eu não consigo fazer.";
+      break;
+    }
+    if (msg.stop_reason === "tool_use") {
+      const results: any[] = [];
+      for (const block of msg.content) {
+        if (block?.type === "tool_use") {
+          const out = await executeTool(block.name, block.input);
+          results.push({ type: "tool_result", tool_use_id: block.id, content: out });
+        }
+      }
+      messages.push({ role: "user", content: results });
+      continue;
+    }
+
+    finalText = extractText(msg.content);
+    break;
+  }
+
+  return finalText || "Recebi sua mensagem, mas não consegui formular uma resposta agora.";
+}
+
+/**
+ * Gera um texto proativo (ex.: briefing matinal) a partir de uma instrução
+ * interna, com o contexto atual. Não usa o histórico como base e não exige
+ * ferramentas — é uma chamada única e curta.
+ */
+export async function composeProactive(instruction: string): Promise<string> {
+  const c = getClient();
+  const contextText = await gatherContext();
+  const messages = [
+    { role: "user", content: `${instruction}\n\n<contexto>\n${contextText}\n</contexto>` },
+  ];
+  const res: any = await c.messages.create({
+    model: config.ANTHROPIC_MODEL,
+    max_tokens: 4000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "medium" },
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+    messages,
+  } as any);
+  await logUsage(res);
+  return extractText(res.content);
+}
