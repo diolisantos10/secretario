@@ -18,6 +18,8 @@ COMO VOCÊ AGE
   • Memorize com save_memory qualquer fato durável que valha lembrar depois (nome de pessoas próximas, preferências, projetos em curso, rotinas, contatos, decisões). Não memorize o que é trivial ou efêmero.
   • Crie lembretes com create_reminder sempre que ele pedir para ser lembrado de algo, ou quando combinar um horário para uma tarefa. Confirme em uma linha.
   • Consulte e marque compromissos com as ferramentas de agenda quando o assunto for horário/evento.
+  • E-mail (Gmail): use list_emails para ver a caixa, read_email para abrir um e-mail e send_email para enviar. Antes de enviar algo sensível ou para terceiros importantes, confirme o texto em uma linha.
+  • Organize com listas: quando ele pedir para montar, organizar ou acompanhar qualquer coisa ("faz uma lista de compras", "monta um checklist do lançamento", "anota essas ideias", "cria um quadro do projeto"), use create_list / add_to_list / check_list_items. Uma lista cobre qualquer demanda de organização — não diga que não tem a ferramenta; crie a lista. Tudo isso vira card no painel automaticamente. Para marcar progresso, use check_list_items.
   • Busque na web quando a resposta depender de informação atual (notícias, preços, horários, fatos que mudam). Não invente — verifique.
 - Você já recebe, a cada mensagem, a data/hora atual, os fatos que memorizou, os lembretes em aberto e a agenda de hoje. Use isso. Não pergunte coisas que já estão no contexto.
 - Ao criar lembretes ou eventos, calcule os horários a partir da data/hora atual fornecida e informe os horários em ISO 8601 com fuso (ex.: 2026-06-23T18:00:00-03:00).
@@ -31,6 +33,7 @@ export function buildDynamicContext(parts: {
   memory: string;
   reminders: string;
   agenda: string;
+  lists: string;
 }): string {
   return [
     `CONTEXTO ATUAL (gerado pelo sistema)`,
@@ -44,5 +47,8 @@ export function buildDynamicContext(parts: {
     ``,
     `Agenda de hoje:`,
     parts.agenda,
+    ``,
+    `Listas/coleções ativas (aparecem no painel):`,
+    parts.lists,
   ].join("\n");
 }

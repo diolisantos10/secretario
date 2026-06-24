@@ -18,6 +18,7 @@ import { loadHistory, type ChatTurn } from "../services/conversation";
 import { loadFacts, formatFacts } from "../services/memory";
 import { listReminders, formatReminders } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
+import { formatListsForContext } from "../services/lists";
 
 const MAX_ITERATIONS = 8;
 const IMAGE_PREFIX = "IMAGE_GENERATED::";
@@ -91,7 +92,7 @@ function buildMessages(history: ChatTurn[], contextText: string, systemAsMessage
 }
 
 async function gatherContext(): Promise<string> {
-  const [facts, reminders] = await Promise.all([loadFacts(), listReminders()]);
+  const [facts, reminders, lists] = await Promise.all([loadFacts(), listReminders(), formatListsForContext()]);
   let agenda = "(agenda do Google não conectada)";
   try {
     if (await calendarConnected()) {
@@ -107,6 +108,7 @@ async function gatherContext(): Promise<string> {
     memory: formatFacts(facts),
     reminders: formatReminders(reminders),
     agenda,
+    lists,
   });
 }
 

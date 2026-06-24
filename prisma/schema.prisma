@@ -60,6 +60,37 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+/// Listas/coleções criadas sob demanda (compras, tarefas, projetos, ideias...).
+/// É a primitiva genérica que permite ao secretário "criar interfaces" a partir
+/// de pedidos em linguagem natural, sem precisar de código novo a cada demanda.
+model List {
+  id        String     @id @default(cuid())
+  name      String
+  kind      String     @default("checklist") // checklist | notes | board — dica de renderização
+  emoji     String? // ícone opcional para o painel
+  archived  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     ListItem[]
+
+  @@index([archived, updatedAt])
+}
+
+/// Item de uma lista (linha checável, com nota opcional).
+model ListItem {
+  id        String   @id @default(cuid())
+  listId    String
+  list      List     @relation(fields: [listId], references: [id], onDelete: Cascade)
+  text      String
+  done      Boolean  @default(false)
+  note      String? // detalhe opcional
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([listId])
+}
+
 /// Estado de autenticação do WhatsApp (Baileys) — sessão do QR Code.
 /// Cada linha é um item da auth state (creds + chaves do protocolo Signal),
 /// serializado com BufferJSON. Permite reconectar após reinício sem reescanear.

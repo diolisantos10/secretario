@@ -12,6 +12,8 @@ import {
   formatReminders,
 } from "../services/reminders";
 import { listEvents, createEvent } from "../services/calendar";
+import { listRecent, readEmail, sendEmail } from "../services/gmail";
+import { createList, addItems, setDone, removeItems, archiveList, getList, allLists, findList } from "../services/lists";
 
 /** Definições das ferramentas custom (o web_search é adicionado no secretary.ts). */
 export const toolDefs = [
@@ -135,12 +137,127 @@ export const toolDefs = [
       required: ["prompt"],
     },
   },
+  {
+    name: "list_emails",
+    description:
+      "Lista e-mails recentes da caixa do dono (Gmail). Use para 'tenho e-mail novo?', 'o que chegou?', resumir a caixa de entrada. Aceita a sintaxe de busca do Gmail no campo query.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Busca no estilo Gmail. Padrão 'in:inbox'. Ex.: 'is:unread', 'from:banco', 'newer_than:2d', 'subject:nota fiscal'.",
+        },
+        max: { type: "integer", description: "Quantos trazer (máx 25). Padrão 10." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "read_email",
+    description:
+      "Lê o conteúdo completo de um e-mail pelo seu id (vindo de list_emails). Marca como lido. Use antes de resumir ou responder um e-mail específico.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string", description: "id do e-mail (do list_emails)." } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "send_email",
+    description:
+      "Envia um e-mail em nome do dono (Gmail). Confirme com o dono antes de enviar se o conteúdo for sensível ou para terceiros importantes. Escreve em texto simples.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Destinatário(s), separados por vírgula." },
+        subject: { type: "string", description: "Assunto." },
+        body: { type: "string", description: "Corpo do e-mail (texto)." },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+  {
+    name: "create_list",
+    description:
+      "Cria uma lista/coleção (compras, tarefas de um projeto, ideias, etapas de um plano, livros, o que for). É a forma de 'montar' qualquer organização que o dono pedir — um Trello, um checklist, um quadro. Se a lista já existir pelo nome, reaproveita. Aparece automaticamente como um card no painel.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Nome da lista (ex.: 'Compras', 'Lançamento do site', 'Ideias de vídeo')." },
+        kind: {
+          type: "string",
+          description: "checklist (itens checáveis, padrão), notes (anotações) ou board (etapas/colunas). Use checklist na dúvida.",
+        },
+        emoji: { type: "string", description: "Um emoji para o card. Opcional." },
+        items: { type: "array", items: { type: "string" }, description: "Itens iniciais. Opcional." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "add_to_list",
+    description: "Adiciona itens a uma lista existente (pelo nome ou pelos últimos 6 chars do id). Cria a lista se não existir.",
+    input_schema: {
+      type: "object",
+      properties: {
+        list: { type: "string", description: "Nome ou id curto da lista." },
+        items: { type: "array", items: { type: "string" }, description: "Itens a adicionar." },
+      },
+      required: ["list", "items"],
+    },
+  },
+  {
+    name: "check_list_items",
+    description: "Marca itens de uma lista como feitos (ou desmarca). Encontra os itens por trecho do texto.",
+    input_schema: {
+      type: "object",
+      properties: {
+        list: { type: "string", description: "Nome ou id curto da lista." },
+        items: { type: "array", items: { type: "string" }, description: "Itens a marcar (trecho do texto basta)." },
+        done: { type: "boolean", description: "true marca como feito (padrão), false desmarca." },
+      },
+      required: ["list", "items"],
+    },
+  },
+  {
+    name: "remove_list_items",
+    description: "Remove itens de uma lista (por trecho do texto).",
+    input_schema: {
+      type: "object",
+      properties: {
+        list: { type: "string", description: "Nome ou id curto da lista." },
+        items: { type: "array", items: { type: "string" }, description: "Itens a remover." },
+      },
+      required: ["list", "items"],
+    },
+  },
+  {
+    name: "view_lists",
+    description:
+      "Mostra as listas. Sem argumento, lista todas com um resumo. Com 'list', mostra os itens daquela lista. Use para responder 'o que tem na lista de compras?'.",
+    input_schema: {
+      type: "object",
+      properties: { list: { type: "string", description: "Nome ou id curto de uma lista específica. Opcional." } },
+      required: [],
+    },
+  },
+  {
+    name: "archive_list",
+    description: "Arquiva uma lista concluída ou que não é mais necessária (some do painel).",
+    input_schema: {
+      type: "object",
+      properties: { list: { type: "string", description: "Nome ou id curto da lista." } },
+      required: ["list"],
+    },
+  },
 ] as const;
 
-/** Mensagem padrão quando a agenda não está conectada. */
-function calendarConnectHint(): string {
+/** Mensagem padrão quando o Google (agenda/e-mail) não está conectado. */
+function calendarConnectHint(what = "a agenda"): string {
   const url = config.PUBLIC_URL ? `${config.PUBLIC_URL}/oauth/google/start` : "(defina PUBLIC_URL)";
-  return `A agenda do Google ainda não está conectada. Peça ao dono para abrir este link uma vez para autorizar: ${url}`;
+  return `O Google ainda não está conectado, então ${what} não está disponível. Peça ao dono para conectar uma vez no painel (Integrações › Google), ou abrir este link: ${url}`;
 }
 
 function resolveReminderId(short: string, ids: string[]): string | null {
@@ -202,11 +319,77 @@ export async function executeTool(name: string, input: any): Promise<string> {
         const caption = (input.caption ?? "").trim();
         return `IMAGE_GENERATED::${url}::${caption}`;
       }
+      case "list_emails": {
+        const emails = await listRecent(input.query || "in:inbox", input.max || 10);
+        if (!emails.length) return "Nenhum e-mail encontrado para esse filtro.";
+        return emails
+          .map((e) => `• [${e.id.slice(-8)}]${e.unread ? " (novo)" : ""} ${e.from} — ${e.subject}\n   ${e.snippet}`)
+          .join("\n");
+      }
+      case "read_email": {
+        const e = await readEmail(input.id);
+        return `De: ${e.from}\nAssunto: ${e.subject}\nData: ${e.date}\n\n${e.body}`;
+      }
+      case "send_email": {
+        await sendEmail(input.to, input.subject, input.body);
+        return `E-mail enviado para ${input.to} — assunto: ${input.subject}`;
+      }
+      case "create_list": {
+        const l = await createList({ name: input.name, kind: input.kind, emoji: input.emoji, items: input.items });
+        return `Lista "${l.name}" pronta (id ${l.id.slice(-6)}) com ${l.items.length} item(ns). Aparece no painel.`;
+      }
+      case "add_to_list": {
+        const found = await findList(input.list);
+        if (!found) {
+          const l = await createList({ name: input.list, items: input.items });
+          return `Lista "${l.name}" criada com ${l.items.length} item(ns).`;
+        }
+        const n = await addItems(found.id, input.items || []);
+        return `Adicionei ${n} item(ns) em "${found.name}".`;
+      }
+      case "check_list_items": {
+        const found = await findList(input.list);
+        if (!found) return `Lista "${input.list}" não encontrada.`;
+        const done = input.done !== false;
+        const n = await setDone(found.id, input.items || [], done);
+        return `${n} item(ns) ${done ? "marcado(s) como feito" : "desmarcado(s)"} em "${found.name}".`;
+      }
+      case "remove_list_items": {
+        const found = await findList(input.list);
+        if (!found) return `Lista "${input.list}" não encontrada.`;
+        const n = await removeItems(found.id, input.items || []);
+        return `${n} item(ns) removido(s) de "${found.name}".`;
+      }
+      case "view_lists": {
+        if (input.list) {
+          const found = await findList(input.list);
+          if (!found) return `Lista "${input.list}" não encontrada.`;
+          const l = await getList(found.id);
+          if (!l) return `Lista "${input.list}" não encontrada.`;
+          if (!l.items.length) return `"${l.name}" está vazia.`;
+          return `${l.emoji ? l.emoji + " " : ""}${l.name}:\n` + l.items.map((i) => `${i.done ? "✓" : "☐"} ${i.text}`).join("\n");
+        }
+        const lists = await allLists();
+        if (!lists.length) return "Nenhuma lista criada ainda.";
+        return lists
+          .map((l) => {
+            const open = l.items.filter((i) => !i.done).length;
+            return `${l.emoji ? l.emoji + " " : ""}${l.name} (id ${l.id.slice(-6)}) — ${open}/${l.items.length} em aberto`;
+          })
+          .join("\n");
+      }
+      case "archive_list": {
+        const found = await findList(input.list);
+        if (!found) return `Lista "${input.list}" não encontrada.`;
+        await archiveList(found.id);
+        return `Lista "${found.name}" arquivada.`;
+      }
       default:
         return `Ferramenta desconhecida: ${name}`;
     }
   } catch (e) {
     if (e instanceof Error && e.message === "AGENDA_NAO_CONECTADA") return calendarConnectHint();
+    if (e instanceof Error && e.message === "EMAIL_NAO_CONECTADO") return calendarConnectHint("o e-mail");
     log.error(`[tools] erro em ${name}`, e);
     return `Erro ao executar ${name}: ${e instanceof Error ? e.message : String(e)}`;
   }

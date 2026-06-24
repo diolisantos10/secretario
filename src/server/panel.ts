@@ -9,6 +9,7 @@ import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
 import { listReminders, createReminder, cancelReminder, completeReminder } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
+import { allLists, setDone, archiveList, createList } from "../services/lists";
 import { runDirectTurn } from "../pipeline";
 import { fmtShort } from "../util/datetime";
 
@@ -84,11 +85,12 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
       try { await setCredentials({ META_VERIFY_TOKEN: verifyToken }); } catch {}
     }
 
-    const [facts, reminders, usage, messages] = await Promise.all([
+    const [facts, reminders, usage, messages, lists] = await Promise.all([
       loadFacts(),
       listReminders(),
       prisma.aiLog.aggregate({ _sum: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true }, _count: true }),
       prisma.message.findMany({ orderBy: { createdAt: "desc" }, take: 30, select: { role: true, content: true, createdAt: true } }),
+      allLists(),
     ]);
 
     let calConnected = false;
@@ -132,6 +134,7 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
         },
       },
       apiKeys: { anthropic: anthropicReady(), openai: openaiReady() },
+      lists,
       facts,
       reminders: reminders.map((r) => ({ id: r.id, text: r.text, status: r.status, dueAt: r.dueAt, due: fmtShort(r.dueAt) })),
       agenda,
@@ -275,6 +278,32 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Listas — marcar/desmarcar item, arquivar, criar (do painel).
+  app.post("/painel/api/lists/toggle", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { listId?: string; itemText?: string; done?: boolean };
+    if (!body.listId || !body.itemText) return reply.send({ ok: false, error: "Faltam dados." });
+    const n = await setDone(body.listId, [body.itemText], body.done !== false);
+    return reply.send({ ok: true, changed: n });
+  });
+
+  app.post("/painel/api/lists/archive", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { listId?: string };
+    if (!body.listId) return reply.send({ ok: false, error: "Informe a lista." });
+    await archiveList(body.listId);
+    return reply.send({ ok: true });
+  });
+
+  app.post("/painel/api/lists/create", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { name?: string; items?: string[] };
+    const name = (body.name ?? "").trim();
+    if (!name) return reply.send({ ok: false, error: "Dê um nome à lista." });
+    const l = await createList({ name, items: body.items });
+    return reply.send({ ok: true, id: l.id });
+  });
+
   // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
   app.get("/painel/api/whatsapp/status", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -354,6 +383,25 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 .chat-err{padding:3px 14px;color:var(--err);font-size:12px;min-height:20px}
 
 .int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}
+.lists-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;align-items:start}
+.list-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.list-card.new-list{align-items:center;justify-content:center;min-height:90px;border-style:dashed}
+.list-hd{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.list-title{font-size:15px;font-weight:650}
+.list-count{font-size:11px;color:var(--mut);background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:2px 9px;white-space:nowrap}
+.list-items{display:flex;flex-direction:column;gap:2px}
+.list-item{display:flex;align-items:flex-start;gap:9px;padding:5px 4px;border-radius:8px;cursor:pointer}
+.list-item:hover{background:var(--soft)}
+.list-item input{margin-top:3px;flex-shrink:0;accent-color:var(--ok)}
+.list-item-tx{font-size:14px;line-height:1.35}
+.list-item.done .list-item-tx{text-decoration:line-through;color:var(--mut)}
+.list-foot{display:flex;gap:6px;margin-top:2px;border-top:1px solid var(--line);padding-top:10px}
+.g-steps{font-size:13px;margin-bottom:6px}
+.g-steps summary{cursor:pointer;color:var(--acc);font-weight:550;padding:6px 0}
+.g-steps .steps-ol{margin:8px 0 0;padding-left:20px;line-height:1.5;color:var(--mut)}
+.g-steps .steps-ol li{margin-bottom:8px}
+.copy-row{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.copy-row code{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px;word-break:break-all;flex:1;min-width:160px}
 .int-card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:26px;transition:border-color .2s}
 .int-card:hover{border-color:#2e3a52}
 .int-card.ok-card{border-color:rgba(16,185,129,.35)}
@@ -466,6 +514,7 @@ function dashboardPage(): string {
       <div class="brand"><span>🤖</span> Secretário de ${owner}</div>
       <nav class="nav" id="nav">
         <button class="nav-btn active" data-page="chat">Chat</button>
+        <button class="nav-btn" data-page="lists">Listas</button>
         <button class="nav-btn" data-page="integrations">Integrações</button>
         <button class="nav-btn" data-page="settings">Configurações</button>
       </nav>
@@ -501,6 +550,15 @@ function dashboardPage(): string {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ===== LISTAS ===== -->
+    <div id="page-lists" class="page">
+      <div class="pg">
+        <h2 class="pg-title">Listas e quadros</h2>
+        <p class="muted" style="margin:-8px 0 18px">Criados sob demanda — peça ao secretário pelo WhatsApp/Telegram ou aqui no chat ("faz uma lista de…").</p>
+        <div class="lists-grid" id="lists-grid"></div>
       </div>
     </div>
 
@@ -554,16 +612,29 @@ function dashboardPage(): string {
             <div class="int-head">
               <div class="int-icon ggl">${GOOGLE_G}</div>
               <div>
-                <div class="int-name">Google Agenda</div>
+                <div class="int-name">Google — Agenda e E-mail</div>
                 <span class="int-badge" id="g-badge">Não configurada</span>
               </div>
             </div>
-            <p class="int-desc">Veja seus eventos, crie compromissos e receba o briefing diário com sua agenda direto pelo secretário.</p>
+            <p class="int-desc">Agenda (ver/criar eventos, briefing diário) <b>e Gmail</b> (ler, resumir e enviar e-mails) pelo secretário. Uma autorização libera os dois.</p>
 
             <!-- Setup form (when no client id) -->
             <div id="g-setup">
-              <p class="muted" style="font-size:13px;margin-bottom:14px">Configure uma vez o app OAuth do Google para habilitar o botão de conexão.</p>
-              <form id="fGoogle" class="fg">
+              <p class="muted" style="font-size:13px;margin-bottom:10px">O Google é a única integração que pede um setup de ~10 min, uma vez só (é regra do Google). Siga o passo a passo:</p>
+              <details class="g-steps">
+                <summary>Ver passo a passo para criar o app do Google</summary>
+                <ol class="steps-ol">
+                  <li>Abra o <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud Console</a> e crie um projeto (qualquer nome).</li>
+                  <li>Em <b>APIs e serviços › Biblioteca</b>, ative <b>Google Calendar API</b> e <b>Gmail API</b>.</li>
+                  <li>Em <b>Tela de consentimento OAuth</b>, escolha <b>Externo</b>, preencha o básico e, em <b>Usuários de teste</b>, adicione o seu próprio e-mail.</li>
+                  <li>Em <b>Credenciais › Criar credenciais › ID do cliente OAuth</b>, tipo <b>Aplicativo da Web</b>.</li>
+                  <li>Em <b>URIs de redirecionamento autorizados</b>, cole exatamente:
+                    <div class="copy-row"><code id="g-redirect">(defina a PUBLIC_URL primeiro)</code><button type="button" class="btn btn-ghost btn-sm" onclick="copyText('g-redirect',this)">Copiar</button></div>
+                  </li>
+                  <li>Copie o <b>Client ID</b> e o <b>Client Secret</b> que aparecem e cole abaixo.</li>
+                </ol>
+              </details>
+              <form id="fGoogle" class="fg" style="margin-top:12px">
                 <div><label class="flabel">Client ID</label><input class="finp" id="gId" placeholder="...apps.googleusercontent.com"></div>
                 <div><label class="flabel">Client Secret</label><input class="finp" type="password" id="gSecret" placeholder="GOCSPX-..."></div>
                 <div class="err" id="gErr"></div>
@@ -576,13 +647,13 @@ function dashboardPage(): string {
               <a href="/oauth/google/start">
                 <button class="btn btn-ggl btn-full" type="button">${GOOGLE_G} &nbsp;Conectar com Google</button>
               </a>
-              <p class="muted" style="font-size:12px;margin-top:8px;text-align:center">Uma janela do Google abrirá — basta entrar e aceitar.</p>
+              <p class="muted" style="font-size:12px;margin-top:8px;text-align:center">Uma janela do Google abrirá — entre e aceite o acesso à Agenda e ao Gmail. Como você é "usuário de teste", pode aparecer um aviso de "app não verificado": clique em <b>Avançado › Acessar (não seguro)</b> — é o seu próprio app.</p>
             </div>
 
             <!-- Connected state -->
             <div id="g-connected" style="display:none">
-              <div class="ok-row"><span class="ok-dot"></span>Agenda conectada e sincronizada</div>
-              <button class="btn btn-danger btn-sm" id="gDisconnect">Desconectar agenda</button>
+              <div class="ok-row"><span class="ok-dot"></span>Agenda e e-mail conectados</div>
+              <button class="btn btn-danger btn-sm" id="gDisconnect">Desconectar Google</button>
             </div>
           </div>
 
@@ -757,19 +828,27 @@ const DASH_JS = [
 
   // Navigation
   "function showPage(name){",
-  "['chat','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'block':'none';});",
+  "['chat','lists','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'block':'none';});",
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-page')===name);});",
   "curPage=name;",
+  "if(name==='lists')renderLists();",
   "if(name==='integrations')renderIntegrations();",
   "if(name==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}",
   "}",
 
   // Load & render
   "function load(){return fetch('/painel/api/state').then(function(r){return r.json();}).then(function(s){if(!s.ok)return;S=s;render();});}",
-  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
+  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='lists')renderLists();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
 
   // Chips
-  "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['Telegram',r.telegram],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
+  "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['Telegram',r.telegram],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected],['E-mail',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
+
+  // Listas (dashboard de cards)
+  "function renderLists(){var grid=document.getElementById('lists-grid');if(!grid||!S)return;grid.innerHTML='';var ls=S.lists||[];if(!ls.length){var em=el('div','empty','Nenhuma lista ainda. Peça uma ao secretário: \"faz uma lista de compras\".');em.style.gridColumn='1/-1';grid.appendChild(em);}",
+  "ls.forEach(function(L){var card=el('div','list-card');var hd=el('div','list-hd');var ti=el('div','list-title',(L.emoji?L.emoji+' ':'')+L.name);hd.appendChild(ti);var open=(L.items||[]).filter(function(i){return !i.done;}).length;var cnt=el('span','list-count',open+'/'+(L.items||[]).length);hd.appendChild(cnt);card.appendChild(hd);",
+  "var ul=el('div','list-items');(L.items||[]).forEach(function(it){var row=el('label','list-item'+(it.done?' done':''));var cb=document.createElement('input');cb.type='checkbox';cb.checked=it.done;cb.onchange=function(){api('/painel/api/lists/toggle',{listId:L.id,itemText:it.text,done:cb.checked}).then(function(){it.done=cb.checked;renderLists();});};row.appendChild(cb);row.appendChild(el('span','list-item-tx',it.text));ul.appendChild(row);});card.appendChild(ul);",
+  "var ft=el('div','list-foot');var addb=el('button','btn btn-ghost btn-sm','+ item');addb.onclick=function(){var t=prompt('Novo item em \"'+L.name+'\":');if(t&&t.trim()){api('/painel/api/lists/create',{name:L.name,items:[t.trim()]}).then(load);}};var arc=el('button','btn btn-ghost btn-sm','arquivar');arc.onclick=function(){if(!confirm('Arquivar \"'+L.name+'\"?'))return;api('/painel/api/lists/archive',{listId:L.id}).then(function(){toast('Lista arquivada');load();});};ft.appendChild(addb);ft.appendChild(arc);card.appendChild(ft);grid.appendChild(card);});",
+  "var nc=el('div','list-card new-list');var nb=el('button','btn btn-pri btn-sm','+ Nova lista');nb.onclick=function(){var nm=prompt('Nome da nova lista:');if(nm&&nm.trim()){api('/painel/api/lists/create',{name:nm.trim()}).then(load);}};nc.appendChild(nb);grid.appendChild(nc);}",
 
   // Chat
   "function renderLog(){var l=document.getElementById('log');if(!l||!S)return;l.innerHTML='';(S.messages||[]).forEach(function(m){addMsg(m.role,m.content,false);});scrollLog();}",
@@ -792,6 +871,7 @@ const DASH_JS = [
   "var gCard=document.getElementById('card-google');var gBadge=document.getElementById('g-badge');var gSetup=document.getElementById('g-setup');var gConn=document.getElementById('g-connect');var gOk=document.getElementById('g-connected');",
   "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectada ✓';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Pronta — clique para autorizar';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não configurada';if(gSetup)gSetup.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
   "var gIdEl=document.getElementById('gId');if(gIdEl&&g.clientId&&!gIdEl.value)gIdEl.value=g.clientId;",
+  "var gRd=document.getElementById('g-redirect');if(gRd)gRd.textContent=g.redirectUri||'(defina a PUBLIC_URL do serviço primeiro)';",
 
   // WhatsApp: popula campos do método Meta e decide o método inicial.
   "var mHook=document.getElementById('m-webhook');if(mHook)mHook.textContent=w.webhookUrl||'(defina a PUBLIC_URL do serviço primeiro)';",
