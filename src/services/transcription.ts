@@ -23,6 +23,21 @@ function extFromMime(mime: string): string {
   return "ogg";
 }
 
+/** Verifica se a chave da OpenAI está presente e é aceita (lista modelos). */
+export async function testOpenAIKey(): Promise<{ ok: boolean; error?: string }> {
+  const key = cred("OPENAI_API_KEY");
+  if (!key) return { ok: false, error: "Nenhuma chave OpenAI salva no sistema." };
+  try {
+    const c = getClient();
+    await c.models.list();
+    return { ok: true };
+  } catch (e: any) {
+    const status = e?.status;
+    if (status === 401) return { ok: false, error: "A chave foi salva, mas a OpenAI recusou (401 — chave inválida ou revogada)." };
+    return { ok: false, error: e?.message || "Falha ao falar com a OpenAI." };
+  }
+}
+
 /** Transcreve um buffer de áudio e retorna o texto em português. */
 export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string> {
   const c = getClient();

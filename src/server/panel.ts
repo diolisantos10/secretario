@@ -11,6 +11,7 @@ import { listReminders, createReminder, cancelReminder, completeReminder } from 
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
 import { runDirectTurn } from "../pipeline";
+import { testOpenAIKey } from "../services/transcription";
 import { fmtShort } from "../util/datetime";
 
 const COOKIE = "secretario_panel";
@@ -54,6 +55,12 @@ function guard(req: FastifyRequest, reply: FastifyReply): boolean {
   if (!panelReady()) { reply.code(503).send({ ok: false, error: "Painel desativado." }); return false; }
   if (!isAuthed(req)) { reply.code(401).send({ ok: false, error: "Não autenticado." }); return false; }
   return true;
+}
+/** Mostra só as pontas da chave (prova que está salva, sem expô-la). */
+function maskKey(k: string): string {
+  if (!k) return "";
+  if (k.length <= 10) return "••••";
+  return k.slice(0, 4) + "…" + k.slice(-4);
 }
 
 export async function registerPanel(app: FastifyInstance): Promise<void> {
@@ -131,7 +138,12 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
           ownerWhatsapp: cred("OWNER_WHATSAPP"),
         },
       },
-      apiKeys: { anthropic: anthropicReady(), openai: openaiReady() },
+      apiKeys: {
+        anthropic: anthropicReady(),
+        openai: openaiReady(),
+        anthropicHint: maskKey(cred("ANTHROPIC_API_KEY")),
+        openaiHint: maskKey(cred("OPENAI_API_KEY")),
+      },
       lists,
       facts,
       reminders: reminders.map((r) => ({ id: r.id, text: r.text, status: r.status, dueAt: r.dueAt, due: fmtShort(r.dueAt) })),
@@ -262,6 +274,13 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     if (openaiKey) vals.OPENAI_API_KEY = openaiKey;
     await setCredentials(vals);
     return reply.send({ ok: true });
+  });
+
+  // Testa a chave da OpenAI de verdade (pinga a API). Confirma que "entrou no sistema".
+  app.post("/painel/api/config/test-openai", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const r = await testOpenAIKey();
+    return reply.send(r);
   });
 
   // Listas — marcar/desmarcar item, arquivar, criar (do painel).
@@ -744,7 +763,11 @@ function dashboardPage(): string {
               <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">OpenAI — obrigatório para transcrever áudio (Whisper) e gerar imagens (DALL-E)</label>
               <input class="finp" id="akOpenai" type="password" placeholder="sk-..." style="width:100%;box-sizing:border-box">
             </div>
-            <button type="submit" class="btn btn-pri btn-sm">Salvar chaves</button>
+            <div class="row" style="gap:8px">
+              <button type="submit" class="btn btn-pri btn-sm">Salvar chaves</button>
+              <button type="button" id="btnTestOpenai" class="btn btn-ghost btn-sm">Testar chave OpenAI</button>
+            </div>
+            <div id="openaiTestResult" style="margin-top:10px;font-size:13px"></div>
           </form>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -892,7 +915,7 @@ const DASH_JS = [
   "function renderReminders(){var box=document.getElementById('reminders');if(!box||!S)return;box.innerHTML='';var r=S.reminders||[];if(!r.length){box.appendChild(el('div','empty','(nenhum em aberto)'));return;}r.forEach(function(x){var it=el('div','item');var top=el('div','itop');top.appendChild(el('div',null,x.text));top.appendChild(el('span','tag',x.due));it.appendChild(top);var act=el('div','row');var d=el('button','btn btn-ghost btn-sm','✓ feito');d.onclick=function(){api('/painel/api/reminders/done',{id:x.id}).then(load);};var c=el('button','btn btn-ghost btn-sm','cancelar');c.onclick=function(){api('/painel/api/reminders/cancel',{id:x.id}).then(load);};act.appendChild(d);act.appendChild(c);it.appendChild(act);box.appendChild(it);});}",
   "function renderSAgenda(){var box=document.getElementById('sagenda');if(!box||!S)return;box.innerHTML='';if(!S.readiness.calendarConnected){box.appendChild(el('div','empty','Agenda não conectada'));return;}var a=S.agenda||[];if(!a.length){box.appendChild(el('div','empty','(sem eventos hoje)'));return;}a.forEach(function(e){var it=el('div','item');it.appendChild(el('div',null,e.summary));it.appendChild(el('div','muted',e.start+(e.location?' · '+e.location:'')));box.appendChild(it);});}",
   "function renderSUsage(){var box=document.getElementById('susage');if(!box||!S)return;box.innerHTML='';var u=S.usage||{};function row2(k,v){var r=el('div','stat');r.appendChild(el('span',null,k));r.appendChild(el('b',null,(v||0).toLocaleString('pt-BR')));box.appendChild(r);}row2('Chamadas',u.calls);row2('Tokens entrada',u.inputTokens);row2('Tokens saída',u.outputTokens);row2('Cache leitura',u.cacheReadTokens);}",
-  "function renderApiKeyStatus(){var box=document.getElementById('apiKeyStatus');if(!box||!S)return;box.innerHTML='';var ak=S.apiKeys||{};function chip(label,ok){var s=el('span','chip'+(ok?' on':''));s.style.cssText='margin-right:8px;font-size:12px';s.textContent=label+(ok?' ✓':' — não configurado');box.appendChild(s);}chip('Claude (Anthropic)',ak.anthropic);chip('OpenAI (áudio/imagem)',ak.openai);}",
+  "function renderApiKeyStatus(){var box=document.getElementById('apiKeyStatus');if(!box||!S)return;box.innerHTML='';var ak=S.apiKeys||{};function row(label,ok,hint){var d=el('div');d.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px';var dot=el('span');dot.style.cssText='width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+(ok?'var(--ok)':'var(--mut)');d.appendChild(dot);d.appendChild(el('span','muted',label));var st=el('b',null,ok?((hint?hint+' ':'')+'✓ no sistema'):'não configurada');st.style.color=ok?'var(--ok)':'var(--mut)';d.appendChild(st);box.appendChild(d);}row('Claude (Anthropic): ',ak.anthropic,ak.anthropicHint);row('OpenAI (áudio/imagem): ',ak.openai,ak.openaiHint);}",
 
   // Wiring — navigation
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.addEventListener('click',function(){showPage(b.getAttribute('data-page'));load();});});",
@@ -920,8 +943,10 @@ const DASH_JS = [
   // Wiring — Google disconnect
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Google desconectado');load();});});",
 
-  // Wiring — API keys form
-  "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';load();}else{toast(j.error||'Falha.',false);}});});",
+  // Wiring — API keys form (salva e já testa a OpenAI pra confirmar que entrou)
+  "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';return load().then(function(){if(ok)testOpenai();});}else{toast(j.error||'Falha.',false);}});});",
+  "function testOpenai(){var res=document.getElementById('openaiTestResult');var btn=document.getElementById('btnTestOpenai');if(res){res.style.color='var(--mut)';res.textContent='Testando a chave com a OpenAI...';}if(btn)btn.disabled=true;return api('/painel/api/config/test-openai',{}).then(function(j){if(btn)btn.disabled=false;if(!res)return;if(j.ok){res.style.color='var(--ok)';res.textContent='✓ Confirmado: a chave OpenAI está no sistema e funcionando. Áudio do Telegram liberado.';}else{res.style.color='var(--err)';res.textContent='✗ '+(j.error||'A chave não passou no teste.');}}).catch(function(){if(btn)btn.disabled=false;if(res){res.style.color='var(--err)';res.textContent='Erro de rede ao testar.';}});}",
+  "document.getElementById('btnTestOpenai').addEventListener('click',testOpenai);",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",
