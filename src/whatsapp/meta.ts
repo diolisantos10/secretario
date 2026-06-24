@@ -18,6 +18,8 @@ export interface IncomingMessage {
   timestamp: Date;
   profileName: string | null;
   phoneNumberId: string | null;
+  audioMediaId?: string; // preenchido quando type === "audio"
+  audioMimeType?: string;
 }
 
 function graphUrl(path: string): string {
@@ -103,6 +105,25 @@ export async function markRead(waMessageId: string): Promise<void> {
   }
 }
 
+/**
+ * Baixa uma mídia (áudio, imagem…) da Meta pelo ID.
+ * Primeiro busca a URL temporária, depois faz o download do binário.
+ */
+export async function downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  const { accessToken, graphVersion } = requireMeta();
+  const metaRes = await fetch(`https://graph.facebook.com/${graphVersion}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!metaRes.ok) throw new Error(`Falha ao obter URL da mídia: HTTP ${metaRes.status}`);
+  const { url, mime_type } = (await metaRes.json()) as { url: string; mime_type: string };
+
+  const mediaRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!mediaRes.ok) throw new Error(`Falha ao baixar mídia: HTTP ${mediaRes.status}`);
+
+  const buffer = Buffer.from(await mediaRes.arrayBuffer());
+  return { buffer, mimeType: mime_type ?? "audio/ogg" };
+}
+
 /** Extrai as mensagens de texto de um payload de webhook da Meta. */
 export function parseIncoming(payload: unknown): IncomingMessage[] {
   const out: IncomingMessage[] = [];
@@ -129,6 +150,8 @@ export function parseIncoming(payload: unknown): IncomingMessage[] {
           timestamp: tsSec ? new Date(tsSec * 1000) : new Date(),
           profileName: profileByWa.get(from) || null,
           phoneNumberId,
+          audioMediaId: m?.audio?.id ?? undefined,
+          audioMimeType: m?.audio?.mime_type ?? undefined,
         });
       }
     }

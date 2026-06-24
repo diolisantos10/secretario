@@ -9,9 +9,10 @@
 import { log } from "./logger";
 import { prisma } from "./db";
 import { isOwner, ownerNumber } from "./util/phone";
-import { type IncomingMessage, sendText, sendImage, markRead } from "./whatsapp/meta";
+import { type IncomingMessage, sendText, sendImage, markRead, downloadMedia } from "./whatsapp/meta";
 import { alreadyProcessed, saveUserMessage, saveAssistantMessage } from "./services/conversation";
 import { respond, type SecretaryResponse } from "./brain/secretary";
+import { transcribeAudio } from "./services/transcription";
 
 const DEBOUNCE_MS = 1200;
 
@@ -78,10 +79,25 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
 
     void markRead(m.waMessageId);
 
+    // Áudio: transcreve com Whisper e trata como texto
+    if (m.type === "audio" && m.audioMediaId) {
+      try {
+        const { buffer, mimeType } = await downloadMedia(m.audioMediaId);
+        const transcription = await transcribeAudio(buffer, m.audioMimeType ?? mimeType);
+        log.info(`[pipeline] áudio transcrito (${transcription.length} chars)`);
+        await saveUserMessage(transcription, m.waMessageId);
+        sawOwnerText = true;
+      } catch (e) {
+        log.error("[pipeline] falha na transcrição de áudio", e);
+        await saveUserMessage(`[áudio — erro na transcrição]`, m.waMessageId);
+        await sendText(ownerNumber(), "Ouvi seu áudio mas não consegui transcrever agora. Pode repetir escrevendo?").catch(() => {});
+      }
+      continue;
+    }
+
     if (m.type !== "text" || !m.text.trim()) {
-      // v1 trata só texto; registra para dedupe e avisa.
       await saveUserMessage(`[mensagem ${m.type} não suportada]`, m.waMessageId);
-      await sendText(ownerNumber(), "Por enquanto eu só consigo ler mensagens de texto. 🙂").catch(() => {});
+      await sendText(ownerNumber(), "Só consigo processar texto e áudio por enquanto. 🙂").catch(() => {});
       continue;
     }
 
