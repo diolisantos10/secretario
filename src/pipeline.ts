@@ -9,8 +9,10 @@
 import { log } from "./logger";
 import { prisma } from "./db";
 import { isOwner, ownerNumber } from "./util/phone";
+import { cred, setCredentials } from "./services/credentials";
 import type { IncomingMessage } from "./whatsapp/meta";
 import { sendText, sendImage, markRead, downloadMedia } from "./whatsapp/channel";
+import { sendTextTG, sendImageTG, telegramConnected } from "./whatsapp/telegram";
 import { alreadyProcessed, saveUserMessage, saveAssistantMessage } from "./services/conversation";
 import { respond, type SecretaryResponse } from "./brain/secretary";
 import { transcribeAudio } from "./services/transcription";
@@ -20,6 +22,33 @@ const DEBOUNCE_MS = 1200;
 let debounceTimer: NodeJS.Timeout | null = null;
 let running = false;
 let rerun = false;
+
+/** Para onde a próxima resposta vai — definido pela última mensagem do dono. */
+type ReplyTarget = { channel: "telegram"; chatId: string } | { channel: "whatsapp" };
+let replyTarget: ReplyTarget = { channel: "whatsapp" };
+
+/** Entrega texto/imagem no canal da última mensagem recebida. */
+async function deliver(text: string, imageUrl?: string | null, caption?: string | null): Promise<void> {
+  if (replyTarget.channel === "telegram") {
+    if (imageUrl) await sendImageTG(replyTarget.chatId, imageUrl, caption || undefined);
+    if (text) await sendTextTG(replyTarget.chatId, text);
+  } else {
+    if (imageUrl) await sendImage(ownerNumber(), imageUrl, caption || undefined);
+    if (text) await sendText(ownerNumber(), text);
+  }
+}
+
+/** Telegram: o primeiro chat que falar com o bot é adotado como dono. */
+function telegramOwnerOk(chatId: string | undefined): boolean {
+  if (!chatId) return false;
+  const owner = cred("TELEGRAM_OWNER_CHAT_ID");
+  if (!owner) {
+    void setCredentials({ TELEGRAM_OWNER_CHAT_ID: chatId });
+    log.info(`[telegram] dono definido automaticamente: chat ${chatId}`);
+    return true;
+  }
+  return owner === chatId;
+}
 
 /** Há uma mensagem do dono ainda sem resposta? */
 async function hasPendingUser(): Promise<boolean> {
@@ -50,15 +79,12 @@ async function process_(): Promise<void> {
       if (!(await hasPendingUser())) break;
       const response = await respond();
       await saveAssistantMessage(response.text);
-      if (response.imageUrl) {
-        await sendImage(ownerNumber(), response.imageUrl, response.imageCaption || undefined);
-      }
-      await sendText(ownerNumber(), response.text);
+      await deliver(response.text, response.imageUrl, response.imageCaption);
     } while (rerun);
   } catch (e) {
     log.error("[pipeline] falha ao responder", e);
     try {
-      await sendText(ownerNumber(), "Tive um problema aqui para responder agora. Pode repetir daqui a pouco?");
+      await deliver("Tive um problema aqui para responder agora. Pode repetir daqui a pouco?");
     } catch {
       /* sem rede para avisar — já logamos acima */
     }
@@ -72,13 +98,26 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
   let sawOwnerText = false;
 
   for (const m of messages) {
-    if (!isOwner(m.from)) {
-      log.warn(`[pipeline] mensagem ignorada (não é o dono): ${m.from}`);
-      continue;
+    const isTelegram = m.channel === "telegram";
+
+    // Allow-list por canal: WhatsApp pelo número; Telegram pelo chat id (auto-adoção).
+    if (isTelegram) {
+      if (!telegramOwnerOk(m.chatId)) {
+        log.warn(`[pipeline] Telegram ignorado (não é o dono): chat ${m.chatId}`);
+        continue;
+      }
+      replyTarget = { channel: "telegram", chatId: m.chatId! };
+    } else {
+      if (!isOwner(m.from)) {
+        log.warn(`[pipeline] mensagem ignorada (não é o dono): ${m.from}`);
+        continue;
+      }
+      replyTarget = { channel: "whatsapp" };
     }
+
     if (await alreadyProcessed(m.waMessageId)) continue;
 
-    void markRead(m.waMessageId);
+    if (!isTelegram) void markRead(m.waMessageId);
 
     // Áudio: transcreve com Whisper e trata como texto
     if (m.type === "audio") {
@@ -98,14 +137,14 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
       } catch (e) {
         log.error("[pipeline] falha na transcrição de áudio", e);
         await saveUserMessage(`[áudio — erro na transcrição]`, m.waMessageId);
-        await sendText(ownerNumber(), "Ouvi seu áudio mas não consegui transcrever agora. Pode repetir escrevendo?").catch(() => {});
+        await deliver("Ouvi seu áudio mas não consegui transcrever agora. Pode repetir escrevendo?").catch(() => {});
       }
       continue;
     }
 
     if (m.type !== "text" || !m.text.trim()) {
       await saveUserMessage(`[mensagem ${m.type} não suportada]`, m.waMessageId);
-      await sendText(ownerNumber(), "Só consigo processar texto e áudio por enquanto. 🙂").catch(() => {});
+      await deliver("Só consigo processar texto e áudio por enquanto. 🙂").catch(() => {});
       continue;
     }
 
@@ -130,9 +169,14 @@ export async function runDirectTurn(text: string): Promise<SecretaryResponse> {
   return response;
 }
 
-/** Envio proativo (lembretes/briefing): envia ao dono e guarda como turno do assistente. */
+/** Envio proativo (lembretes/briefing): manda pelo canal conectado e guarda o turno. */
 export async function sendProactive(text: string): Promise<void> {
   if (!text.trim()) return;
-  await sendText(ownerNumber(), text);
+  const tgChat = cred("TELEGRAM_OWNER_CHAT_ID");
+  if (telegramConnected() && tgChat) {
+    await sendTextTG(tgChat, text);
+  } else {
+    await sendText(ownerNumber(), text);
+  }
   await saveAssistantMessage(text);
 }

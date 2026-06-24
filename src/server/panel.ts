@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config, panelReady, anthropicReady, openaiReady } from "../config";
 import { cred, setCredentials, metaReady, googleReady } from "../services/credentials";
 import { waStatus, startWhatsApp, logoutWhatsApp, waConnected } from "../whatsapp/baileys";
+import { telegramStatus, startTelegram, logoutTelegram, telegramConnected } from "../whatsapp/telegram";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
@@ -101,12 +102,21 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     } catch (e) { log.debug("[painel] agenda indisponível", e); }
 
     const publicUrl = config.PUBLIC_URL || "";
+    const tg = telegramStatus();
     return reply.send({
       ok: true,
       owner: config.OWNER_NAME,
-      readiness: { claude: anthropicReady(), openai: openaiReady(), whatsapp: waConnected() || metaReady(), calendarConnected: calConnected },
+      readiness: { claude: anthropicReady(), openai: openaiReady(), telegram: telegramConnected(), whatsapp: waConnected() || metaReady(), calendarConnected: calConnected },
       integrations: {
         publicUrl,
+        telegram: {
+          configured: Boolean(cred("TELEGRAM_BOT_TOKEN")),
+          connected: tg.state === "open",
+          state: tg.state,
+          botUsername: tg.botUsername,
+          ownerLinked: tg.ownerLinked,
+          error: tg.error,
+        },
         google: {
           configured: googleReady(),
           connected: calConnected,
@@ -226,6 +236,30 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Telegram — salvar token + iniciar o bot / estado / remover.
+  app.post("/painel/api/integrations/telegram", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { token?: string };
+    const token = (body.token ?? "").trim();
+    if (!/^\d+:[\w-]{20,}$/.test(token)) return reply.send({ ok: false, error: "Token inválido. Cole exatamente o que o @BotFather mandou." });
+    await setCredentials({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_OWNER_CHAT_ID: "" });
+    await startTelegram();
+    const st = telegramStatus();
+    if (st.state === "error") return reply.send({ ok: false, error: st.error || "Não consegui conectar com esse token." });
+    return reply.send({ ok: true, botUsername: st.botUsername });
+  });
+
+  app.get("/painel/api/telegram/status", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    return reply.send({ ok: true, ...telegramStatus() });
+  });
+
+  app.post("/painel/api/integrations/telegram/disconnect", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    await logoutTelegram();
+    return reply.send({ ok: true });
+  });
+
   // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
   app.get("/painel/api/whatsapp/status", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -312,6 +346,7 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 .int-icon{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .int-icon.ggl{background:#fff}
 .int-icon.wap{background:#128c7e;font-size:26px}
+.int-icon.tg{background:#229ED9}
 .int-name{font-size:16px;font-weight:650}
 .int-badge{font-size:11px;padding:3px 9px;border-radius:999px;margin-top:4px;display:inline-block;background:var(--soft);border:1px solid var(--line);color:var(--mut)}
 .int-badge.ok{background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3);color:var(--ok)}
@@ -377,6 +412,8 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 const GOOGLE_G = `<svg viewBox="0 0 24 24" width="26" height="26"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>`;
 
 const WA_ICON = `<svg viewBox="0 0 24 24" width="28" height="28" fill="#25d366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12.05 2.025C6.495 2.025 1.98 6.535 1.98 12.085c0 1.76.46 3.413 1.26 4.847L1.98 22.025l5.245-1.375a10.04 10.04 0 0 0 4.825 1.23c5.555 0 10.07-4.51 10.07-10.06C22.12 6.27 17.6 2.025 12.05 2.025z"/></svg>`;
+
+const TG_ICON = `<svg viewBox="0 0 24 24" width="28" height="28" fill="#fff"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.27 1.37.17 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>`;
 
 function shell(title: string, body: string): string {
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>${STYLE}</style></head><body>${body}</body></html>`;
@@ -457,6 +494,45 @@ function dashboardPage(): string {
       <div class="pg">
         <h2 class="pg-title">Integrações</h2>
         <div class="int-grid">
+
+          <!-- Telegram (o mais fácil) -->
+          <div class="int-card" id="card-tg">
+            <div class="int-head">
+              <div class="int-icon tg">${TG_ICON}</div>
+              <div>
+                <div class="int-name">Telegram</div>
+                <span class="int-badge" id="t-badge">Não configurado</span>
+              </div>
+            </div>
+            <p class="int-desc">O jeito mais fácil de falar com o secretário como um <b>contato separado</b> — sem segundo número, sem chip. Texto ou áudio.</p>
+
+            <!-- setup: colar token -->
+            <div id="t-setup">
+              <ol class="steps-ol">
+                <li>No Telegram, abra <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> e envie <b>/newbot</b>. Escolha um nome e um @usuário para o seu secretário.</li>
+                <li>O BotFather devolve um <b>token</b> (tipo <code>123456789:AAE...</code>). Cole aqui:</li>
+              </ol>
+              <form id="fTg" class="fg">
+                <div><label class="flabel">Token do bot</label><input class="finp" type="password" id="t-token" placeholder="123456789:AAE..."></div>
+                <div class="err" id="t-err"></div>
+                <button class="btn btn-pri btn-full">Conectar bot</button>
+              </form>
+            </div>
+
+            <!-- conectado, aguardando 1ª mensagem do dono -->
+            <div id="t-waiting" style="display:none">
+              <div class="ok-row"><span class="ok-dot"></span><span id="t-bot-w">Bot conectado</span></div>
+              <p class="muted" style="font-size:13px;margin-bottom:14px">Falta só o último passo: abra <a id="t-link-w" href="#" target="_blank" rel="noopener"><b>o seu bot no Telegram</b></a> e mande qualquer mensagem (ex.: "oi"). Assim ele aprende que é você. 👇</p>
+              <button class="btn btn-danger btn-sm" id="t-logout-w" type="button">Remover</button>
+            </div>
+
+            <!-- tudo pronto -->
+            <div id="t-open" style="display:none">
+              <div class="ok-row"><span class="ok-dot"></span><span id="t-bot-o">Tudo pronto!</span></div>
+              <p class="muted" style="font-size:13px;margin-bottom:14px">Fale com o secretário pelo <a id="t-link-o" href="#" target="_blank" rel="noopener"><b>seu bot</b></a> — pode mandar texto ou áudio, e ele responde por lá.</p>
+              <button class="btn btn-danger btn-sm" id="t-logout-o" type="button">Desconectar</button>
+            </div>
+          </div>
 
           <!-- Google -->
           <div class="int-card" id="card-google">
@@ -662,7 +738,7 @@ const DASH_JS = [
   "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
 
   // Chips
-  "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
+  "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['Telegram',r.telegram],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
 
   // Chat
   "function renderLog(){var l=document.getElementById('log');if(!l||!S)return;l.innerHTML='';(S.messages||[]).forEach(function(m){addMsg(m.role,m.content,false);});scrollLog();}",
@@ -677,6 +753,9 @@ const DASH_JS = [
 
   // Integrations
   "function renderIntegrations(){if(!S)return;var ig=S.integrations||{};var g=ig.google||{};var w=ig.whatsapp||{};",
+
+  // Telegram: aplica estado + dispara o poller enquanto não estiver pronto.
+  "applyTg(ig.telegram||{});",
 
   // Google states
   "var gCard=document.getElementById('card-google');var gBadge=document.getElementById('g-badge');var gSetup=document.getElementById('g-setup');var gConn=document.getElementById('g-connect');var gOk=document.getElementById('g-connected');",
@@ -719,6 +798,19 @@ const DASH_JS = [
   "else if(s==='connecting'){card.className='int-card';badge.className='int-badge rdy';badge.textContent='Conectando...';conn.style.display='block';}",
   "else{card.className='int-card';badge.className='int-badge';badge.textContent='Não conectado';idle.style.display='block';}}",
 
+  // ---- Telegram (poller próprio até ficar pronto) ----
+  "var tgTimer=null;",
+  "function startTgPoll(){if(tgTimer)return;tgTimer=setInterval(function(){if(curPage!=='integrations'){stopTgPoll();return;}pollTg();},3000);}",
+  "function stopTgPoll(){if(tgTimer){clearInterval(tgTimer);tgTimer=null;}}",
+  "function pollTg(){return fetch('/painel/api/telegram/status').then(function(r){return r.json();}).then(function(st){if(st&&st.ok)applyTg(st);return st;}).catch(function(){});}",
+  "function tgLink(u){return u?('https://t.me/'+u):'#';}",
+  "function applyTg(t){var card=document.getElementById('card-tg'),badge=document.getElementById('t-badge'),setup=document.getElementById('t-setup'),wait=document.getElementById('t-waiting'),open=document.getElementById('t-open');if(!badge)return;var s=t.state||'idle';setup.style.display='none';wait.style.display='none';open.style.display='none';",
+  "if(s==='open'&&t.ownerLinked){card.className='int-card ok-card';badge.className='int-badge ok';badge.textContent='Conectado ✓';open.style.display='block';document.getElementById('t-link-o').href=tgLink(t.botUsername);document.getElementById('t-bot-o').textContent=t.botUsername?('Tudo pronto! @'+t.botUsername):'Tudo pronto!';stopTgPoll();}",
+  "else if(s==='open'){card.className='int-card';badge.className='int-badge rdy';badge.textContent='Mande \"oi\" pro bot';wait.style.display='block';document.getElementById('t-link-w').href=tgLink(t.botUsername);document.getElementById('t-bot-w').textContent=t.botUsername?('Bot @'+t.botUsername+' conectado'):'Bot conectado';startTgPoll();}",
+  "else if(s==='connecting'){card.className='int-card';badge.className='int-badge rdy';badge.textContent='Conectando...';setup.style.display='block';startTgPoll();}",
+  "else if(s==='error'){card.className='int-card';badge.className='int-badge';badge.textContent='Erro';setup.style.display='block';var te=document.getElementById('t-err');if(te&&t.error){te.className='err';te.textContent=t.error;}}",
+  "else{card.className='int-card';badge.className='int-badge';badge.textContent='Não configurado';setup.style.display='block';}}",
+
   // Settings
   "function renderFacts(){var box=document.getElementById('facts');if(!box||!S)return;box.innerHTML='';var f=S.facts||[];if(!f.length){box.appendChild(el('div','empty','(nada memorizado ainda)'));return;}f.forEach(function(x){var it=el('div','item');var top=el('div','itop');var left=el('div');left.appendChild(el('span','tag',x.category));left.appendChild(document.createTextNode(' '+x.key));var b=el('button','btn btn-danger btn-sm','esquecer');b.onclick=function(){api('/painel/api/memory/forget',{key:x.key}).then(load);};top.appendChild(left);top.appendChild(b);it.appendChild(top);it.appendChild(el('div','muted',x.value));box.appendChild(it);});}",
   "function renderReminders(){var box=document.getElementById('reminders');if(!box||!S)return;box.innerHTML='';var r=S.reminders||[];if(!r.length){box.appendChild(el('div','empty','(nenhum em aberto)'));return;}r.forEach(function(x){var it=el('div','item');var top=el('div','itop');top.appendChild(el('div',null,x.text));top.appendChild(el('span','tag',x.due));it.appendChild(top);var act=el('div','row');var d=el('button','btn btn-ghost btn-sm','✓ feito');d.onclick=function(){api('/painel/api/reminders/done',{id:x.id}).then(load);};var c=el('button','btn btn-ghost btn-sm','cancelar');c.onclick=function(){api('/painel/api/reminders/cancel',{id:x.id}).then(load);};act.appendChild(d);act.appendChild(c);it.appendChild(act);box.appendChild(it);});}",
@@ -743,6 +835,10 @@ const DASH_JS = [
   "document.getElementById('fMeta').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('m-err');err.className='err';err.textContent='';var pn=document.getElementById('m-pnid').value.trim();var tk=document.getElementById('m-token').value.trim();var sc=document.getElementById('m-secret').value.trim();var ow=document.getElementById('m-owner').value.trim();if(!pn||!tk){err.textContent='Preencha o Phone number ID e o token de acesso.';return;}api('/painel/api/integrations/whatsapp',{phoneNumberId:pn,accessToken:tk,appSecret:sc,ownerWhatsapp:ow}).then(function(j){if(j.ok){toast('WhatsApp (Meta) ativado!');document.getElementById('m-token').value='';document.getElementById('m-secret').value='';load();}else{err.textContent=j.error||'Falha ao salvar.';}});});",
   "document.getElementById('m-edit').addEventListener('click',function(){document.getElementById('m-connected').style.display='none';document.getElementById('m-setup').style.display='block';});",
   "document.getElementById('m-disconnect').addEventListener('click',function(){if(!confirm('Remover a configuração da Meta? O secretário deixa de responder por este número.'))return;api('/painel/api/integrations/whatsapp/disconnect',{}).then(function(){toast('Configuração removida');load();});});",
+
+  // Wiring — Telegram
+  "document.getElementById('fTg').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('t-err');err.className='err';err.textContent='';var tk=document.getElementById('t-token').value.trim();if(!tk){err.textContent='Cole o token do BotFather.';return;}applyTg({state:'connecting'});api('/painel/api/integrations/telegram',{token:tk}).then(function(j){if(j.ok){document.getElementById('t-token').value='';toast('Bot conectado!');startTgPoll();pollTg();load();}else{err.className='err';err.textContent=j.error||'Falha ao conectar.';applyTg({state:'error',error:j.error});}}).catch(function(){err.textContent='Erro de rede.';});});",
+  "['t-logout-w','t-logout-o'].forEach(function(id){var b=document.getElementById(id);if(b)b.addEventListener('click',function(){if(!confirm('Remover o bot do Telegram?'))return;api('/painel/api/integrations/telegram/disconnect',{}).then(function(){toast('Bot removido');stopTgPoll();applyTg({state:'idle'});load();});});});",
 
   // Wiring — Google disconnect
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Agenda desconectada');load();});});",

@@ -28,6 +28,8 @@ const MANAGED = [
   "META_VERIFY_TOKEN",
   "META_GRAPH_VERSION",
   "OWNER_WHATSAPP",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_OWNER_CHAT_ID",
 ] as const;
 export type CredKey = (typeof MANAGED)[number];
 

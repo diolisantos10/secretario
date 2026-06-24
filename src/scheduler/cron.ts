@@ -6,6 +6,7 @@
 import cron from "node-cron";
 import { config, anthropicReady } from "../config";
 import { canSendWhatsApp } from "../whatsapp/channel";
+import { telegramConnected } from "../whatsapp/telegram";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { dueReminders, markSent } from "../services/reminders";
@@ -21,9 +22,14 @@ async function setSetting(key: string, value: string): Promise<void> {
   await prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/** Há algum canal (Telegram ou WhatsApp) pronto para enviar? */
+function canSend(): boolean {
+  return telegramConnected() || canSendWhatsApp();
+}
+
 /** Dispara lembretes vencidos. */
 async function dispatchDueReminders(): Promise<void> {
-  if (!canSendWhatsApp()) return;
+  if (!canSend()) return;
   const due = await dueReminders();
   for (const r of due) {
     try {
@@ -37,7 +43,7 @@ async function dispatchDueReminders(): Promise<void> {
 
 /** Envia o briefing matinal (uma vez por dia). */
 async function sendDailyBriefing(): Promise<void> {
-  if (!canSendWhatsApp() || !anthropicReady()) return;
+  if (!canSend() || !anthropicReady()) return;
   const today = todayKey();
   if ((await getSetting("lastBriefing")) === today) return; // já enviado hoje
   try {

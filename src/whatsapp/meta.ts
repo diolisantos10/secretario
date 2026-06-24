@@ -11,16 +11,18 @@ import { digits } from "../util/phone";
 const WA_TEXT_LIMIT = 4000; // limite da Meta é ~4096; deixamos folga
 
 export interface IncomingMessage {
-  from: string; // telefone do remetente (dígitos)
-  waMessageId: string; // wamid
+  from: string; // telefone do remetente (dígitos) ou id do usuário (Telegram)
+  waMessageId: string; // wamid (ou "tg:<chat>:<id>" no Telegram) — usado no dedupe
   type: string; // text | image | audio | ...
   text: string; // corpo (vazio se não-texto)
   timestamp: Date;
   profileName: string | null;
   phoneNumberId: string | null;
+  channel?: "whatsapp" | "telegram"; // canal de origem (default: whatsapp)
+  chatId?: string; // id do chat do Telegram — destino da resposta
   audioMediaId?: string; // preenchido quando type === "audio" (canal Meta)
   audioMimeType?: string;
-  audioBuffer?: Buffer; // áudio já baixado (canal Baileys/QR)
+  audioBuffer?: Buffer; // áudio já baixado (canal Baileys/QR/Telegram)
 }
 
 function graphUrl(path: string): string {
