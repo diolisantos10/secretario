@@ -28,6 +28,7 @@ import QRCode from "qrcode";
 import pino from "pino";
 import { prisma } from "../db";
 import { log } from "../logger";
+import { cred, setCredentials } from "../services/credentials";
 import type { IncomingMessage } from "./meta";
 
 const logger = pino({ level: "silent" });
@@ -174,6 +175,20 @@ export async function startWhatsApp(): Promise<void> {
         connState = "open";
         qrDataUrl = null;
         log.info(`[whatsapp] conectado como ${sock?.user?.id ?? "?"}`);
+        // Modo "número pessoal": se o dono ainda não escolheu quem pode falar com
+        // o secretário, assume o próprio número conectado — assim a "conversa com
+        // você mesmo" já funciona sem nenhum passo extra.
+        try {
+          if (!cred("OWNER_WHATSAPP") && sock?.user?.id) {
+            const me = jidNormalizedUser(sock.user.id).split("@")[0].replace(/\D/g, "");
+            if (me) {
+              await setCredentials({ OWNER_WHATSAPP: me });
+              log.info(`[whatsapp] dono definido automaticamente: ${me}`);
+            }
+          }
+        } catch (e) {
+          log.error("[whatsapp] falha ao autodefinir o dono", e);
+        }
       }
       if (connection === "close") {
         const code = (lastDisconnect?.error as any)?.output?.statusCode;

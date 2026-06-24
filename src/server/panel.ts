@@ -516,12 +516,13 @@ function dashboardPage(): string {
             <!-- open -->
             <div id="w-open" style="display:none">
               <div class="ok-row"><span class="ok-dot"></span><span id="w-me">Conectado</span></div>
+              <p class="muted" style="font-size:13px;margin-bottom:10px">✅ Tudo pronto! Fale com o secretário no chat <b>“Conversa com você mesmo”</b> do seu WhatsApp — pode mandar texto ou áudio.</p>
               <label class="flabel">Quem pode falar com o secretário?</label>
               <div class="row" style="margin-bottom:6px">
                 <input class="finp" id="w-owner" placeholder="55 11 99999-8888" style="flex:1">
                 <button class="btn btn-pri btn-sm" id="w-owner-save" type="button">Salvar</button>
               </div>
-              <p class="muted" style="font-size:12px;margin-bottom:14px">Deixe o <b>seu próprio número</b> para conversar no chat “Conversa com você mesmo”. Ou use outro número, se este for um WhatsApp dedicado ao secretário.</p>
+              <p class="muted" style="font-size:12px;margin-bottom:14px">Já configurado com o seu número automaticamente. Mude aqui só se quiser usar outro número (ex.: um WhatsApp dedicado ao secretário).</p>
               <button class="btn btn-danger btn-sm" id="w-logout" type="button">Desconectar</button>
             </div>
           </div>
