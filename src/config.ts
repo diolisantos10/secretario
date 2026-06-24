@@ -16,6 +16,8 @@ const schema = z.object({
   PORT: z.coerce.number().default(8080),
   PUBLIC_URL: z.string().url().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Senha do painel web (/painel). Se vazia, o painel fica desativado.
+  PANEL_PASSWORD: z.string().optional(),
 
   // Dono / preferências
   OWNER_WHATSAPP: z.string().optional(), // número internacional só dígitos, ex: 5511999999999
@@ -64,6 +66,11 @@ export function metaReady(): boolean {
 /** Pronto para pensar (Claude)? */
 export function anthropicReady(): boolean {
   return Boolean(config.ANTHROPIC_API_KEY);
+}
+
+/** Painel web habilitado? (precisa de uma senha definida). */
+export function panelReady(): boolean {
+  return Boolean(config.PANEL_PASSWORD);
 }
 
 /** Pronto para a agenda (Google Calendar)? */

@@ -9,6 +9,7 @@ Serviço **standalone** — banco, deploy e código próprios, totalmente isolad
 - 📅 **Agenda** — lê e cria eventos no seu Google Calendar; entra no resumo do dia.
 - 🔎 **Busca na web** — responde com informação atual quando precisa (sem inventar).
 - ☀️ **Briefing matinal** — todo dia de manhã, um bom-dia com a agenda e as pendências.
+- 🖥️ **Painel web (`/painel`)** — cockpit no navegador: converse com o secretário (mesmo cérebro do WhatsApp), veja/edite memória, lembretes, agenda e o uso/custo. Serve também de **interface de testes** — funciona só com banco + chave da Anthropic, sem precisar configurar o WhatsApp.
 
 Ele só atende **você** (allow-list pelo seu número). Mensagens de qualquer outro número são ignoradas.
 
@@ -102,6 +103,13 @@ npm run db:push           # cria as tabelas
 npm run dev               # sobe em http://localhost:8080
 ```
 Para testar o webhook local, exponha a porta com algo como `ngrok http 8080` e use a URL no painel da Meta.
+
+### Painel web (`/painel`) — o jeito mais rápido de testar
+Defina `PANEL_PASSWORD` (e `ANTHROPIC_API_KEY` + `DATABASE_URL`) e abra `http://localhost:8080/painel`.
+Entre com a senha e você já consegue **conversar com o secretário pelo navegador** — é o mesmo cérebro,
+memória e ferramentas do WhatsApp, só que sem precisar da Meta. Útil para iterar no comportamento, ver o
+que ele memorizou, conferir lembretes/agenda e acompanhar o custo. O painel só liga se `PANEL_PASSWORD`
+estiver definida.
 
 ---
 

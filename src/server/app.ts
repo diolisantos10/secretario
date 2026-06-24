@@ -2,6 +2,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerWebhook } from "./webhook";
 import { registerOAuth } from "./oauth";
+import { registerPanel } from "./panel";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
@@ -22,6 +23,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await registerWebhook(app);
   await registerOAuth(app);
+  await registerPanel(app);
 
   return app;
 }

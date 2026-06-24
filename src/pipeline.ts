@@ -89,6 +89,20 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
   if (sawOwnerText) scheduleProcessing();
 }
 
+/**
+ * Processa um turno direto (ex.: chat do painel web) e devolve a resposta.
+ * Usa o mesmo cérebro, histórico e memória do WhatsApp — é o MESMO secretário —
+ * mas não envia nada pelo WhatsApp. Ideal para testar/planejar pelo navegador.
+ */
+export async function runDirectTurn(text: string): Promise<string> {
+  const clean = text.trim();
+  if (!clean) return "";
+  await saveUserMessage(clean);
+  const reply = await respond();
+  await saveAssistantMessage(reply);
+  return reply;
+}
+
 /** Envio proativo (lembretes/briefing): envia ao dono e guarda como turno do assistente. */
 export async function sendProactive(text: string): Promise<void> {
   if (!text.trim()) return;
