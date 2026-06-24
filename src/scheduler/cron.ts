@@ -4,7 +4,8 @@
  * - Uma vez por dia (BRIEFING_TIME): envia o resumo matinal.
  */
 import cron from "node-cron";
-import { config, anthropicReady } from "../config";
+import { config } from "../config";
+import { anthropicReady } from "../services/credentials";
 import { canSendWhatsApp } from "../whatsapp/channel";
 import { telegramConnected } from "../whatsapp/telegram";
 import { log } from "../logger";

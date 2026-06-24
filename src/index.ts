@@ -1,5 +1,6 @@
 /** Ponto de entrada: sobe o servidor e o agendador. */
-import { config, anthropicReady, panelReady, openaiReady } from "./config";
+import { config, panelReady } from "./config";
+import { anthropicReady, openaiReady } from "./services/credentials";
 import { metaReady, googleReady, hydrateCredentials } from "./services/credentials";
 import { log } from "./logger";
 import { prisma } from "./db";

@@ -8,7 +8,8 @@
  * que não suportam.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { config, anthropicReady } from "../config";
+import { config } from "../config";
+import { cred, anthropicReady } from "../services/credentials";
 import { log } from "../logger";
 import { SYSTEM_PROMPT, buildDynamicContext } from "./prompt";
 import { toolDefs, executeTool } from "./tools";
@@ -28,9 +29,14 @@ export interface SecretaryResponse {
 }
 
 let client: Anthropic | null = null;
+let lastApiKey = "";
 function getClient(): Anthropic {
-  if (!anthropicReady()) throw new Error("Claude não configurado — defina ANTHROPIC_API_KEY.");
-  if (!client) client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+  const key = cred("ANTHROPIC_API_KEY");
+  if (!key) throw new Error("Claude não configurado — adicione a chave Anthropic pelo painel.");
+  if (!client || lastApiKey !== key) {
+    lastApiKey = key;
+    client = new Anthropic({ apiKey: key });
+  }
   return client;
 }
 

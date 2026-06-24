@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { config, panelReady, anthropicReady, openaiReady } from "../config";
-import { cred, setCredentials, metaReady, googleReady } from "../services/credentials";
+import { config, panelReady } from "../config";
+import { cred, setCredentials, metaReady, googleReady, anthropicReady, openaiReady } from "../services/credentials";
 import { waStatus, startWhatsApp, logoutWhatsApp, waConnected } from "../whatsapp/baileys";
 import { telegramStatus, startTelegram, logoutTelegram, telegramConnected } from "../whatsapp/telegram";
 import { log } from "../logger";
@@ -131,6 +131,7 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
           ownerWhatsapp: cred("OWNER_WHATSAPP"),
         },
       },
+      apiKeys: { anthropic: anthropicReady(), openai: openaiReady() },
       facts,
       reminders: reminders.map((r) => ({ id: r.id, text: r.text, status: r.status, dueAt: r.dueAt, due: fmtShort(r.dueAt) })),
       agenda,
@@ -257,6 +258,20 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   app.post("/painel/api/integrations/telegram/disconnect", async (req, reply) => {
     if (!guard(req, reply)) return;
     await logoutTelegram();
+    return reply.send({ ok: true });
+  });
+
+  // Chaves de API (Anthropic + OpenAI) — configuráveis pelo painel.
+  app.post("/painel/api/config/api-keys", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { anthropicKey?: string; openaiKey?: string };
+    const anthropicKey = (body.anthropicKey ?? "").trim();
+    const openaiKey = (body.openaiKey ?? "").trim();
+    if (!anthropicKey && !openaiKey) return reply.send({ ok: false, error: "Informe ao menos uma chave." });
+    const vals: Partial<Record<"ANTHROPIC_API_KEY" | "OPENAI_API_KEY", string>> = {};
+    if (anthropicKey) vals.ANTHROPIC_API_KEY = anthropicKey;
+    if (openaiKey) vals.OPENAI_API_KEY = openaiKey;
+    await setCredentials(vals);
     return reply.send({ ok: true });
   });
 
@@ -678,6 +693,22 @@ function dashboardPage(): string {
     <div id="page-settings" class="page">
       <div class="pg">
         <h2 class="pg-title">Configurações</h2>
+        <div class="card" style="margin-bottom:16px">
+          <div class="ctitle">Chaves de API</div>
+          <p class="muted" style="margin:0 0 12px">Cole aqui suas chaves. Elas ficam salvas no banco de dados, não no código.</p>
+          <div id="apiKeyStatus" style="margin-bottom:10px"></div>
+          <form id="fApiKeys">
+            <div style="margin-bottom:10px">
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Claude (Anthropic) — obrigatório para o secretário pensar</label>
+              <input class="finp" id="akAnthropic" type="password" placeholder="sk-ant-..." style="width:100%;box-sizing:border-box">
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">OpenAI — obrigatório para transcrever áudio (Whisper) e gerar imagens (DALL-E)</label>
+              <input class="finp" id="akOpenai" type="password" placeholder="sk-..." style="width:100%;box-sizing:border-box">
+            </div>
+            <button type="submit" class="btn btn-pri btn-sm">Salvar chaves</button>
+          </form>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
             <div class="card">
@@ -730,12 +761,12 @@ const DASH_JS = [
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-page')===name);});",
   "curPage=name;",
   "if(name==='integrations')renderIntegrations();",
-  "if(name==='settings'){renderFacts();renderReminders();renderSAgenda();renderSUsage();}",
+  "if(name==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}",
   "}",
 
   // Load & render
   "function load(){return fetch('/painel/api/state').then(function(r){return r.json();}).then(function(s){if(!s.ok)return;S=s;render();});}",
-  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
+  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
 
   // Chips
   "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['Telegram',r.telegram],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
@@ -816,6 +847,7 @@ const DASH_JS = [
   "function renderReminders(){var box=document.getElementById('reminders');if(!box||!S)return;box.innerHTML='';var r=S.reminders||[];if(!r.length){box.appendChild(el('div','empty','(nenhum em aberto)'));return;}r.forEach(function(x){var it=el('div','item');var top=el('div','itop');top.appendChild(el('div',null,x.text));top.appendChild(el('span','tag',x.due));it.appendChild(top);var act=el('div','row');var d=el('button','btn btn-ghost btn-sm','✓ feito');d.onclick=function(){api('/painel/api/reminders/done',{id:x.id}).then(load);};var c=el('button','btn btn-ghost btn-sm','cancelar');c.onclick=function(){api('/painel/api/reminders/cancel',{id:x.id}).then(load);};act.appendChild(d);act.appendChild(c);it.appendChild(act);box.appendChild(it);});}",
   "function renderSAgenda(){var box=document.getElementById('sagenda');if(!box||!S)return;box.innerHTML='';if(!S.readiness.calendarConnected){box.appendChild(el('div','empty','Agenda não conectada'));return;}var a=S.agenda||[];if(!a.length){box.appendChild(el('div','empty','(sem eventos hoje)'));return;}a.forEach(function(e){var it=el('div','item');it.appendChild(el('div',null,e.summary));it.appendChild(el('div','muted',e.start+(e.location?' · '+e.location:'')));box.appendChild(it);});}",
   "function renderSUsage(){var box=document.getElementById('susage');if(!box||!S)return;box.innerHTML='';var u=S.usage||{};function row2(k,v){var r=el('div','stat');r.appendChild(el('span',null,k));r.appendChild(el('b',null,(v||0).toLocaleString('pt-BR')));box.appendChild(r);}row2('Chamadas',u.calls);row2('Tokens entrada',u.inputTokens);row2('Tokens saída',u.outputTokens);row2('Cache leitura',u.cacheReadTokens);}",
+  "function renderApiKeyStatus(){var box=document.getElementById('apiKeyStatus');if(!box||!S)return;box.innerHTML='';var ak=S.apiKeys||{};function chip(label,ok){var s=el('span','chip'+(ok?' on':''));s.style.cssText='margin-right:8px;font-size:12px';s.textContent=label+(ok?' ✓':' — não configurado');box.appendChild(s);}chip('Claude (Anthropic)',ak.anthropic);chip('OpenAI (áudio/imagem)',ak.openai);}",
 
   // Wiring — navigation
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.addEventListener('click',function(){showPage(b.getAttribute('data-page'));load();});});",
@@ -845,6 +877,9 @@ const DASH_JS = [
 
   // Wiring — Google form
   "document.getElementById('fGoogle').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('gErr');err.textContent='';err.className='err';var id=document.getElementById('gId').value.trim();var sec=document.getElementById('gSecret').value.trim();if(!id||!sec){err.textContent='Preencha Client ID e Secret.';return;}api('/painel/api/integrations/google',{clientId:id,clientSecret:sec}).then(function(j){if(j.ok){err.className='suc';err.textContent='Salvo! Agora clique em Conectar com Google.';document.getElementById('gSecret').value='';load();}else{err.textContent=j.error||'Falha.';}});});",
+
+  // Wiring — API keys form
+  "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';load();}else{toast(j.error||'Falha.',false);}});});",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",

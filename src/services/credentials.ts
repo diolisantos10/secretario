@@ -18,6 +18,8 @@ const PREFIX = "cred:";
 
 /** Chaves que o painel pode gravar. */
 const MANAGED = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "GOOGLE_REDIRECT_URI",
@@ -80,6 +82,16 @@ export async function setCredentials(values: Partial<Record<CredKey, string>>): 
 /** Chave de cifragem (para crypto.ts). */
 export function getEncryptionKey(): string {
   return cred("ENCRYPTION_KEY");
+}
+
+/** Claude (Anthropic) está configurado? */
+export function anthropicReady(): boolean {
+  return Boolean(cred("ANTHROPIC_API_KEY"));
+}
+
+/** OpenAI (Whisper/DALL-E) está configurado? */
+export function openaiReady(): boolean {
+  return Boolean(cred("OPENAI_API_KEY"));
 }
 
 /** Google Calendar tem as credenciais de app necessárias? */

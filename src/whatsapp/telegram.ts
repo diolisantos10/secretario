@@ -70,7 +70,9 @@ function sleep(ms: number): Promise<void> {
 
 async function downloadFile(fileId: string): Promise<Buffer> {
   const f = await tg("getFile", { file_id: fileId });
-  const res = await fetch(`${API}/file/bot${token()}/${f.file_path}`);
+  const res = await fetch(`${API}/file/bot${token()}/${f.file_path}`, {
+    signal: AbortSignal.timeout(30000),
+  });
   if (!res.ok) throw new Error(`download HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -203,10 +205,12 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
   if (voice?.file_id) {
     try {
       const buffer = await downloadFile(voice.file_id);
-      return { ...base, type: "audio", text: "", audioBuffer: buffer, audioMimeType: voice.mime_type || "audio/ogg" };
+      const mime = (voice.mime_type || "audio/ogg").split(";")[0];
+      return { ...base, type: "audio", text: "", audioBuffer: buffer, audioMimeType: mime };
     } catch (e) {
       log.error("[telegram] falha ao baixar áudio", e);
-      return { ...base, type: "audio", text: "", audioMimeType: voice.mime_type || "audio/ogg" };
+      // Return null so o pipeline não tenta transcrever um buffer vazio.
+      return null;
     }
   }
 

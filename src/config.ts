@@ -61,20 +61,13 @@ if (!parsed.success) {
 export const config = parsed.data;
 export type Config = typeof config;
 
-/** Pronto para pensar (Claude)? */
-export function anthropicReady(): boolean {
-  return Boolean(config.ANTHROPIC_API_KEY);
-}
-
 /** Painel web habilitado? (precisa de uma senha definida). */
 export function panelReady(): boolean {
   return Boolean(config.PANEL_PASSWORD);
 }
 
-/** Pronto para gerar imagens (DALL-E 3)? */
-export function openaiReady(): boolean {
-  return Boolean(config.OPENAI_API_KEY);
-}
+// anthropicReady() e openaiReady() vivem agora em services/credentials.ts
+// pois leem do banco (configurável pelo painel), não só do ambiente.
 
 // metaReady / googleReady / requireMeta vivem agora em services/credentials.ts,
 // pois leem do banco (configurável pelo painel), não só do ambiente.

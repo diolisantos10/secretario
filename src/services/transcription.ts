@@ -1,11 +1,16 @@
 /** Transcrição de áudio via OpenAI Whisper. */
 import OpenAI from "openai";
-import { config } from "../config";
+import { cred } from "./credentials";
 
 let client: OpenAI | null = null;
+let lastKey = "";
 function getClient(): OpenAI {
-  if (!config.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurado.");
-  if (!client) client = new OpenAI({ apiKey: config.OPENAI_API_KEY });
+  const key = cred("OPENAI_API_KEY");
+  if (!key) throw new Error("Transcrição de áudio requer a chave OpenAI — configure pelo painel em Configurações › Chaves de API.");
+  if (!client || lastKey !== key) {
+    lastKey = key;
+    client = new OpenAI({ apiKey: key });
+  }
   return client;
 }
 
