@@ -41,6 +41,25 @@ function getClient(): Anthropic {
   return client;
 }
 
+/** Verifica se a chave Claude (Anthropic) está presente e é aceita. */
+export async function testAnthropicKey(): Promise<{ ok: boolean; error?: string }> {
+  const key = cred("ANTHROPIC_API_KEY");
+  if (!key) return { ok: false, error: "Nenhuma chave Claude (Anthropic) salva no sistema." };
+  try {
+    const c = getClient();
+    await c.models.list();
+    return { ok: true };
+  } catch (e: any) {
+    const status = e?.status;
+    if (status === 401)
+      return {
+        ok: false,
+        error: "A chave foi salva, mas a Anthropic recusou (401). Confira se você não colou a chave da OpenAI (sk-proj…) no campo do Claude — a do Claude começa com sk-ant-.",
+      };
+    return { ok: false, error: e?.message || "Falha ao falar com a Anthropic." };
+  }
+}
+
 function webSearchTool() {
   return config.ENABLE_WEB_SEARCH ? [{ type: "web_search_20260209", name: "web_search" }] : [];
 }

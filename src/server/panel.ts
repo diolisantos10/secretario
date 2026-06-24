@@ -12,6 +12,7 @@ import { listToday, isConnected as calendarConnected } from "../services/calenda
 import { allLists, setDone, archiveList, createList } from "../services/lists";
 import { runDirectTurn } from "../pipeline";
 import { testOpenAIKey } from "../services/transcription";
+import { testAnthropicKey } from "../brain/secretary";
 import { fmtShort } from "../util/datetime";
 
 const COOKIE = "secretario_panel";
@@ -280,6 +281,13 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   app.post("/painel/api/config/test-openai", async (req, reply) => {
     if (!guard(req, reply)) return;
     const r = await testOpenAIKey();
+    return reply.send(r);
+  });
+
+  // Testa a chave do Claude (Anthropic) de verdade. Detecta chave trocada.
+  app.post("/painel/api/config/test-anthropic", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const r = await testAnthropicKey();
     return reply.send(r);
   });
 
@@ -765,9 +773,11 @@ function dashboardPage(): string {
             </div>
             <div class="row" style="gap:8px">
               <button type="submit" class="btn btn-pri btn-sm">Salvar chaves</button>
+              <button type="button" id="btnTestAnthropic" class="btn btn-ghost btn-sm">Testar chave Claude</button>
               <button type="button" id="btnTestOpenai" class="btn btn-ghost btn-sm">Testar chave OpenAI</button>
             </div>
-            <div id="openaiTestResult" style="margin-top:10px;font-size:13px"></div>
+            <div id="anthropicTestResult" style="margin-top:10px;font-size:13px"></div>
+            <div id="openaiTestResult" style="margin-top:6px;font-size:13px"></div>
           </form>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -944,9 +954,11 @@ const DASH_JS = [
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Google desconectado');load();});});",
 
   // Wiring — API keys form (salva e já testa a OpenAI pra confirmar que entrou)
-  "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';return load().then(function(){if(ok)testOpenai();});}else{toast(j.error||'Falha.',false);}});});",
+  "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';return load().then(function(){if(ak)testAnthropic();if(ok)testOpenai();});}else{toast(j.error||'Falha.',false);}});});",
   "function testOpenai(){var res=document.getElementById('openaiTestResult');var btn=document.getElementById('btnTestOpenai');if(res){res.style.color='var(--mut)';res.textContent='Testando a chave com a OpenAI...';}if(btn)btn.disabled=true;return api('/painel/api/config/test-openai',{}).then(function(j){if(btn)btn.disabled=false;if(!res)return;if(j.ok){res.style.color='var(--ok)';res.textContent='✓ Confirmado: a chave OpenAI está no sistema e funcionando. Áudio do Telegram liberado.';}else{res.style.color='var(--err)';res.textContent='✗ '+(j.error||'A chave não passou no teste.');}}).catch(function(){if(btn)btn.disabled=false;if(res){res.style.color='var(--err)';res.textContent='Erro de rede ao testar.';}});}",
+  "function testAnthropic(){var res=document.getElementById('anthropicTestResult');var btn=document.getElementById('btnTestAnthropic');if(res){res.style.color='var(--mut)';res.textContent='Testando a chave com a Anthropic...';}if(btn)btn.disabled=true;return api('/painel/api/config/test-anthropic',{}).then(function(j){if(btn)btn.disabled=false;if(!res)return;if(j.ok){res.style.color='var(--ok)';res.textContent='✓ Confirmado: a chave do Claude está no sistema e funcionando. O secretário pensa normalmente.';}else{res.style.color='var(--err)';res.textContent='✗ '+(j.error||'A chave não passou no teste.');}}).catch(function(){if(btn)btn.disabled=false;if(res){res.style.color='var(--err)';res.textContent='Erro de rede ao testar.';}});}",
   "document.getElementById('btnTestOpenai').addEventListener('click',testOpenai);",
+  "document.getElementById('btnTestAnthropic').addEventListener('click',testAnthropic);",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",
