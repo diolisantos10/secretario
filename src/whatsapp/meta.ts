@@ -65,6 +65,30 @@ export async function sendText(to: string, body: string): Promise<void> {
   }
 }
 
+/** Envia uma imagem por URL ao destinatário (default: ao dono). */
+export async function sendImage(to: string, imageUrl: string, caption?: string): Promise<void> {
+  const { phoneNumberId, accessToken } = requireMeta();
+  const recipient = digits(to);
+  const body: any = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: recipient,
+    type: "image",
+    image: { link: imageUrl },
+  };
+  if (caption) body.image.caption = caption;
+  const res = await fetch(graphUrl(`${phoneNumberId}/messages`), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    log.error(`[meta] envio de imagem falhou (HTTP ${res.status})`, detail.slice(0, 500));
+    throw new Error(`Falha ao enviar imagem WhatsApp: HTTP ${res.status}`);
+  }
+}
+
 /** Marca uma mensagem recebida como lida (✓✓ azul). Best-effort. */
 export async function markRead(waMessageId: string): Promise<void> {
   try {

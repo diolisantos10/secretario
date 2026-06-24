@@ -25,6 +25,9 @@ const schema = z.object({
   TIMEZONE: z.string().default("America/Sao_Paulo"),
   BRIEFING_TIME: z.string().default("07:30"), // HH:MM no fuso acima; vazio desliga
 
+  // OpenAI (geração de imagens com DALL-E 3)
+  OPENAI_API_KEY: z.string().optional(),
+
   // Claude (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-4-8"),
@@ -71,6 +74,11 @@ export function anthropicReady(): boolean {
 /** Painel web habilitado? (precisa de uma senha definida). */
 export function panelReady(): boolean {
   return Boolean(config.PANEL_PASSWORD);
+}
+
+/** Pronto para gerar imagens (DALL-E 3)? */
+export function openaiReady(): boolean {
+  return Boolean(config.OPENAI_API_KEY);
 }
 
 /** Pronto para a agenda (Google Calendar)? */

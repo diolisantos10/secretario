@@ -9,9 +9,9 @@
 import { log } from "./logger";
 import { prisma } from "./db";
 import { isOwner, ownerNumber } from "./util/phone";
-import { type IncomingMessage, sendText, markRead } from "./whatsapp/meta";
+import { type IncomingMessage, sendText, sendImage, markRead } from "./whatsapp/meta";
 import { alreadyProcessed, saveUserMessage, saveAssistantMessage } from "./services/conversation";
-import { respond } from "./brain/secretary";
+import { respond, type SecretaryResponse } from "./brain/secretary";
 
 const DEBOUNCE_MS = 1200;
 
@@ -46,9 +46,12 @@ async function process_(): Promise<void> {
     do {
       rerun = false;
       if (!(await hasPendingUser())) break;
-      const reply = await respond();
-      await saveAssistantMessage(reply);
-      await sendText(ownerNumber(), reply);
+      const response = await respond();
+      await saveAssistantMessage(response.text);
+      if (response.imageUrl) {
+        await sendImage(ownerNumber(), response.imageUrl, response.imageCaption || undefined);
+      }
+      await sendText(ownerNumber(), response.text);
     } while (rerun);
   } catch (e) {
     log.error("[pipeline] falha ao responder", e);
@@ -94,13 +97,13 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
  * Usa o mesmo cérebro, histórico e memória do WhatsApp — é o MESMO secretário —
  * mas não envia nada pelo WhatsApp. Ideal para testar/planejar pelo navegador.
  */
-export async function runDirectTurn(text: string): Promise<string> {
+export async function runDirectTurn(text: string): Promise<SecretaryResponse> {
   const clean = text.trim();
-  if (!clean) return "";
+  if (!clean) return { text: "" };
   await saveUserMessage(clean);
-  const reply = await respond();
-  await saveAssistantMessage(reply);
-  return reply;
+  const response = await respond();
+  await saveAssistantMessage(response.text);
+  return response;
 }
 
 /** Envio proativo (lembretes/briefing): envia ao dono e guarda como turno do assistente. */

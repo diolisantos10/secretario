@@ -3,6 +3,7 @@ import { config } from "../config";
 import { log } from "../logger";
 import { fmtLong } from "../util/datetime";
 import { saveFact, forgetFact } from "../services/memory";
+import { generateImage } from "../services/imageGen";
 import {
   createReminder,
   listReminders,
@@ -114,6 +115,26 @@ export const toolDefs = [
       required: ["summary", "start"],
     },
   },
+  {
+    name: "generate_image",
+    description:
+      "Gera uma imagem com DALL-E 3 (OpenAI) a partir de uma descrição em texto. Use quando o dono pedir para criar, desenhar ou gerar uma imagem. A imagem é enviada diretamente para o WhatsApp (ou exibida no painel).",
+    input_schema: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description:
+            "Descrição detalhada da imagem em inglês, sendo específico sobre estilo, composição e detalhes visuais.",
+        },
+        caption: {
+          type: "string",
+          description: "Legenda curta em português para enviar junto com a imagem. Opcional.",
+        },
+      },
+      required: ["prompt"],
+    },
+  },
 ] as const;
 
 /** Mensagem padrão quando a agenda não está conectada. */
@@ -175,6 +196,11 @@ export async function executeTool(name: string, input: any): Promise<string> {
       case "create_calendar_event": {
         const ev = await createEvent(input);
         return `Evento criado: ${ev.summary} em ${ev.start}.`;
+      }
+      case "generate_image": {
+        const url = await generateImage(input.prompt);
+        const caption = (input.caption ?? "").trim();
+        return `IMAGE_GENERATED::${url}::${caption}`;
       }
       default:
         return `Ferramenta desconhecida: ${name}`;

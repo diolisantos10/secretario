@@ -19,6 +19,13 @@ import { listReminders, formatReminders } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 
 const MAX_ITERATIONS = 8;
+const IMAGE_PREFIX = "IMAGE_GENERATED::";
+
+export interface SecretaryResponse {
+  text: string;
+  imageUrl?: string;
+  imageCaption?: string;
+}
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -111,9 +118,9 @@ function baseParams(messages: any[]) {
 
 /**
  * Processa a conversa atual (histórico já inclui a última mensagem do dono) e
- * devolve o texto da resposta. Persistir/enviar é responsabilidade de quem chama.
+ * devolve a resposta. Persistir/enviar é responsabilidade de quem chama.
  */
-export async function respond(): Promise<string> {
+export async function respond(): Promise<SecretaryResponse> {
   const c = getClient();
   const history = await loadHistory();
   const contextText = await gatherContext();
@@ -122,6 +129,9 @@ export async function respond(): Promise<string> {
   let messages = buildMessages(history, contextText, systemAsMessage);
 
   let finalText = "";
+  let pendingImageUrl: string | undefined;
+  let pendingImageCaption: string | undefined;
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     let msg: any;
     try {
@@ -151,7 +161,13 @@ export async function respond(): Promise<string> {
       const results: any[] = [];
       for (const block of msg.content) {
         if (block?.type === "tool_use") {
-          const out = await executeTool(block.name, block.input);
+          let out = await executeTool(block.name, block.input);
+          if (out.startsWith(IMAGE_PREFIX)) {
+            const parts = out.slice(IMAGE_PREFIX.length).split("::");
+            pendingImageUrl = parts[0];
+            pendingImageCaption = parts[1] ?? "";
+            out = "Imagem gerada com sucesso. Avise o dono brevemente que a imagem foi criada e enviada.";
+          }
           results.push({ type: "tool_result", tool_use_id: block.id, content: out });
         }
       }
@@ -163,7 +179,11 @@ export async function respond(): Promise<string> {
     break;
   }
 
-  return finalText || "Recebi sua mensagem, mas não consegui formular uma resposta agora.";
+  return {
+    text: finalText || "Recebi sua mensagem, mas não consegui formular uma resposta agora.",
+    imageUrl: pendingImageUrl,
+    imageCaption: pendingImageCaption,
+  };
 }
 
 /**

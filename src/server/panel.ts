@@ -201,8 +201,8 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     const text = (body.text ?? "").trim();
     if (!text) return reply.send({ ok: false, error: "Mensagem vazia." });
     try {
-      const replyText = await runDirectTurn(text);
-      return reply.send({ ok: true, reply: replyText });
+      const result = await runDirectTurn(text);
+      return reply.send({ ok: true, reply: result.text, imageUrl: result.imageUrl ?? null, imageCaption: result.imageCaption ?? null });
     } catch (e) {
       log.error("[painel] chat falhou", e);
       return reply.send({ ok: false, error: e instanceof Error ? e.message : "Falha ao responder." });
@@ -402,10 +402,11 @@ const DASH_JS = [
   // ---- chat ----
   "function renderLog(){var l=document.getElementById('log');l.innerHTML='';(S.messages||[]).forEach(function(m){addMsg(m.role,m.content,false);});scrollLog();}",
   "function addMsg(role,text,scroll){var l=document.getElementById('log');var m=el('div','msg '+(role==='user'?'user':'assistant'));var w=el('span','who',role==='user'?S.owner:'secretário');m.appendChild(w);m.appendChild(document.createTextNode(text));l.appendChild(m);if(scroll!==false)scrollLog();}",
+  "function addImgMsg(url,cap){var l=document.getElementById('log');var m=el('div','msg assistant');var w=el('span','who','secretário');m.appendChild(w);var img=document.createElement('img');img.src=url;img.alt='imagem gerada';img.style.cssText='max-width:100%;border-radius:8px;margin-top:6px;display:block';m.appendChild(img);if(cap){m.appendChild(el('div','muted',cap));}l.appendChild(m);scrollLog();}",
   "function scrollLog(){var l=document.getElementById('log');l.scrollTop=l.scrollHeight;}",
   "function send(){var i=document.getElementById('input');var t=i.value.trim();if(!t)return;var err=document.getElementById('chatErr');err.textContent='';i.value='';addMsg('user',t);var b=document.getElementById('send');b.disabled=true;b.textContent='...';",
   "var typing=el('div','msg assistant','escrevendo...');typing.id='typing';document.getElementById('log').appendChild(typing);scrollLog();",
-  "api('/painel/api/chat',{text:t}).then(function(j){var tp=document.getElementById('typing');if(tp)tp.remove();b.disabled=false;b.textContent='Enviar';if(j.ok){addMsg('assistant',j.reply);load();}else{err.textContent=j.error||'Falha.';}}).catch(function(){var tp=document.getElementById('typing');if(tp)tp.remove();b.disabled=false;b.textContent='Enviar';err.textContent='Erro de rede.';});}",
+  "api('/painel/api/chat',{text:t}).then(function(j){var tp=document.getElementById('typing');if(tp)tp.remove();b.disabled=false;b.textContent='Enviar';if(j.ok){addMsg('assistant',j.reply);if(j.imageUrl){addImgMsg(j.imageUrl,j.imageCaption||'');}load();}else{err.textContent=j.error||'Falha.';}}).catch(function(){var tp=document.getElementById('typing');if(tp)tp.remove();b.disabled=false;b.textContent='Enviar';err.textContent='Erro de rede.';});}",
   // ---- memória ----
   "function renderFacts(){var box=document.getElementById('facts');box.innerHTML='';var f=S.facts||[];if(!f.length){box.appendChild(el('div','empty','(nada memorizado ainda)'));return;}",
   "f.forEach(function(x){var it=el('div','item');var top=el('div','top');var left=el('div');left.appendChild(el('span','tag',x.category));left.appendChild(document.createTextNode(' '+x.key));var b=el('button','ghost mini','esquecer');b.onclick=function(){api('/painel/api/memory/forget',{key:x.key}).then(load);};top.appendChild(left);top.appendChild(b);it.appendChild(top);it.appendChild(el('div','muted',x.value));box.appendChild(it);});}",
