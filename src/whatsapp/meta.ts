@@ -4,7 +4,7 @@
  * Enviar:  POST graph.facebook.com/{version}/{PHONE_NUMBER_ID}/messages (Bearer token).
  * Receber: o webhook entrega entry[].changes[].value.messages[]; aqui só normalizamos.
  */
-import { requireMeta } from "../config";
+import { requireMeta } from "../services/credentials";
 import { log } from "../logger";
 import { digits } from "../util/phone";
 

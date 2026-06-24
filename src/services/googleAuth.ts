@@ -4,7 +4,7 @@
  * a cada renovação via evento 'tokens'.
  */
 import { google } from "googleapis";
-import { config, googleReady } from "../config";
+import { cred, googleReady } from "./credentials";
 import { prisma } from "../db";
 import { encrypt, decrypt } from "../util/crypto";
 import { log } from "../logger";
@@ -16,9 +16,9 @@ const TOKEN_ID = "owner";
 function baseClient() {
   if (!googleReady()) return null;
   return new google.auth.OAuth2(
-    config.GOOGLE_CLIENT_ID,
-    config.GOOGLE_CLIENT_SECRET,
-    config.GOOGLE_REDIRECT_URI,
+    cred("GOOGLE_CLIENT_ID"),
+    cred("GOOGLE_CLIENT_SECRET"),
+    cred("GOOGLE_REDIRECT_URI"),
   );
 }
 

@@ -61,11 +61,6 @@ if (!parsed.success) {
 export const config = parsed.data;
 export type Config = typeof config;
 
-/** Pronto para enviar/receber no WhatsApp? */
-export function metaReady(): boolean {
-  return Boolean(config.META_PHONE_NUMBER_ID && config.META_ACCESS_TOKEN);
-}
-
 /** Pronto para pensar (Claude)? */
 export function anthropicReady(): boolean {
   return Boolean(config.ANTHROPIC_API_KEY);
@@ -81,26 +76,5 @@ export function openaiReady(): boolean {
   return Boolean(config.OPENAI_API_KEY);
 }
 
-/** Pronto para a agenda (Google Calendar)? */
-export function googleReady(): boolean {
-  return Boolean(
-    config.GOOGLE_CLIENT_ID &&
-      config.GOOGLE_CLIENT_SECRET &&
-      config.GOOGLE_REDIRECT_URI &&
-      config.ENCRYPTION_KEY,
-  );
-}
-
-/** Credenciais Meta exigidas no ponto de envio. Lança erro amigável se faltarem. */
-export function requireMeta() {
-  if (!config.META_PHONE_NUMBER_ID || !config.META_ACCESS_TOKEN) {
-    throw new Error(
-      "WhatsApp Meta não configurado — defina META_PHONE_NUMBER_ID e META_ACCESS_TOKEN.",
-    );
-  }
-  return {
-    phoneNumberId: config.META_PHONE_NUMBER_ID,
-    accessToken: config.META_ACCESS_TOKEN,
-    graphVersion: config.META_GRAPH_VERSION,
-  };
-}
+// metaReady / googleReady / requireMeta vivem agora em services/credentials.ts,
+// pois leem do banco (configurável pelo painel), não só do ambiente.

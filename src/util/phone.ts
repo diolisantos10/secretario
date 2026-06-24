@@ -1,5 +1,5 @@
 /** Normalização e allow-list de telefone. O serviço só atende o dono. */
-import { config } from "../config";
+import { cred } from "../services/credentials";
 
 /** Mantém apenas os dígitos. */
 export function digits(s: string | null | undefined): string {
@@ -12,7 +12,7 @@ export function digits(s: string | null | undefined): string {
  */
 export function isOwner(from: string | null | undefined): boolean {
   const a = digits(from);
-  const b = digits(config.OWNER_WHATSAPP);
+  const b = digits(cred("OWNER_WHATSAPP"));
   if (!a || !b) return false;
   if (a === b) return true;
   return a.slice(-8) === b.slice(-8);
@@ -20,5 +20,5 @@ export function isOwner(from: string | null | undefined): boolean {
 
 /** Número do dono em formato de envio (só dígitos). */
 export function ownerNumber(): string {
-  return digits(config.OWNER_WHATSAPP);
+  return digits(cred("OWNER_WHATSAPP"));
 }

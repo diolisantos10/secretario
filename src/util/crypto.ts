@@ -3,10 +3,10 @@
  * Formato de saída: base64(iv).base64(tag).base64(ciphertext)
  */
 import crypto from "node:crypto";
-import { config } from "../config";
+import { getEncryptionKey } from "../services/credentials";
 
 function loadKey(): Buffer {
-  const raw = config.ENCRYPTION_KEY;
+  const raw = getEncryptionKey();
   if (!raw) throw new Error("ENCRYPTION_KEY ausente — necessária para cifrar tokens do Google.");
   // Aceita hex (64 chars) ou base64 (resolve para 32 bytes).
   let key: Buffer;

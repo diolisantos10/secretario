@@ -4,7 +4,8 @@
  * - Uma vez por dia (BRIEFING_TIME): envia o resumo matinal.
  */
 import cron from "node-cron";
-import { config, metaReady, anthropicReady } from "../config";
+import { config, anthropicReady } from "../config";
+import { metaReady } from "../services/credentials";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { dueReminders, markSent } from "../services/reminders";

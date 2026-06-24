@@ -1,7 +1,7 @@
 /** Rotas de OAuth do Google Calendar (conectar a agenda uma única vez). */
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { googleReady } from "../config";
+import { googleReady } from "../services/credentials";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { buildAuthUrl, exchangeCode } from "../services/googleAuth";
@@ -27,7 +27,7 @@ export async function registerOAuth(app: FastifyInstance): Promise<void> {
       return reply
         .code(503)
         .type("text/html")
-        .send(page("Agenda não configurada", "Faltam as credenciais do Google (GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI e ENCRYPTION_KEY)."));
+        .send(page("Agenda não configurada", "Faltam as credenciais do Google. Preencha o Client ID e o Client Secret na página de integrações do painel."));
     }
     const state = crypto.randomBytes(16).toString("hex");
     await setSetting("googleOAuthState", state);

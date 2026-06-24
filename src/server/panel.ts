@@ -11,13 +11,13 @@
  */
 import crypto from "node:crypto";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { config, panelReady, anthropicReady, openaiReady } from "../config";
 import {
-  config,
-  panelReady,
-  anthropicReady,
+  cred,
+  setCredentials,
   metaReady,
   googleReady,
-} from "../config";
+} from "../services/credentials";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
@@ -160,15 +160,35 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
       log.debug("[painel] agenda indisponível", e);
     }
 
+    const publicUrl = config.PUBLIC_URL || "";
+
     return reply.send({
       ok: true,
       owner: config.OWNER_NAME,
       timezone: config.TIMEZONE,
       readiness: {
         claude: anthropicReady(),
+        openai: openaiReady(),
         whatsapp: metaReady(),
         googleConfigured: googleReady(),
         calendarConnected: calConnected,
+      },
+      integrations: {
+        publicUrl,
+        google: {
+          configured: googleReady(),
+          connected: calConnected,
+          clientId: cred("GOOGLE_CLIENT_ID"),
+          redirectUri:
+            cred("GOOGLE_REDIRECT_URI") || (publicUrl ? publicUrl + "/oauth/google/callback" : ""),
+        },
+        whatsapp: {
+          configured: metaReady(),
+          webhookUrl: publicUrl ? publicUrl + "/webhook/meta" : "",
+          verifyToken: cred("META_VERIFY_TOKEN"),
+          phoneNumberId: cred("META_PHONE_NUMBER_ID"),
+          ownerWhatsapp: cred("OWNER_WHATSAPP"),
+        },
       },
       facts,
       reminders: reminders.map((r) => ({
@@ -264,6 +284,59 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     if (!body.id) return reply.send({ ok: false, error: "Informe o id." });
     const ok = await cancelReminder(body.id);
     return reply.send({ ok });
+  });
+
+  // Integrações: salvar credenciais (Google / WhatsApp) pelo painel — sem código.
+  app.post("/painel/api/integrations/google", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { clientId?: string; clientSecret?: string };
+    const clientId = (body.clientId ?? "").trim();
+    const clientSecret = (body.clientSecret ?? "").trim();
+    if (!clientId || !clientSecret) {
+      return reply.send({ ok: false, error: "Informe o Client ID e o Client Secret." });
+    }
+    const redirectUri = config.PUBLIC_URL
+      ? config.PUBLIC_URL + "/oauth/google/callback"
+      : cred("GOOGLE_REDIRECT_URI");
+    if (!redirectUri) {
+      return reply.send({ ok: false, error: "Defina a PUBLIC_URL do serviço primeiro." });
+    }
+    await setCredentials({
+      GOOGLE_CLIENT_ID: clientId,
+      GOOGLE_CLIENT_SECRET: clientSecret,
+      GOOGLE_REDIRECT_URI: redirectUri,
+    });
+    return reply.send({ ok: true });
+  });
+
+  app.post("/painel/api/integrations/google/disconnect", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    await prisma.googleToken.deleteMany({});
+    return reply.send({ ok: true });
+  });
+
+  app.post("/painel/api/integrations/whatsapp", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as {
+      phoneNumberId?: string;
+      accessToken?: string;
+      appSecret?: string;
+      verifyToken?: string;
+      ownerWhatsapp?: string;
+    };
+    const phoneNumberId = (body.phoneNumberId ?? "").trim();
+    const accessToken = (body.accessToken ?? "").trim();
+    if (!phoneNumberId || !accessToken) {
+      return reply.send({ ok: false, error: "Phone Number ID e Access Token são obrigatórios." });
+    }
+    await setCredentials({
+      META_PHONE_NUMBER_ID: phoneNumberId,
+      META_ACCESS_TOKEN: accessToken,
+      META_APP_SECRET: (body.appSecret ?? "").trim(),
+      META_VERIFY_TOKEN: (body.verifyToken ?? "").trim(),
+      OWNER_WHATSAPP: (body.ownerWhatsapp ?? "").trim().replace(/\D/g, ""),
+    });
+    return reply.send({ ok: true });
   });
 
   log.info("[painel] rotas /painel registradas" + (panelReady() ? "" : " (desativado: defina PANEL_PASSWORD)"));
@@ -365,6 +438,36 @@ function dashboardPage(): string {
     "</div></div>" +
     // Coluna direita: cards
     "<div>" +
+    // Integrações (regra de ouro: clicar e logar, sem código)
+    "<div class=\"card\"><h2>Integrações</h2>" +
+    "<div class=\"item\"><div class=\"top\"><b>📅 Google Agenda</b><span class=\"tag\" id=\"gStatus\">—</span></div>" +
+    "<div class=\"muted\" style=\"margin:8px 0 4px\">1) No Google Cloud, cole este endereço em <i>Authorized redirect URIs</i>:</div>" +
+    "<code id=\"gRedirect\" style=\"display:block;word-break:break-all;font-size:12px;padding:6px\"></code>" +
+    "<div class=\"muted\" style=\"margin:8px 0 4px\">2) Cole aqui o Client ID e o Secret e salve:</div>" +
+    "<form class=\"inline\" id=\"fGoogle\" style=\"flex-direction:column;align-items:stretch\">" +
+    "<input id=\"gId\" placeholder=\"Client ID\">" +
+    "<input id=\"gSecret\" type=\"password\" placeholder=\"Client Secret\">" +
+    "<button class=\"mini\">Salvar credenciais</button></form>" +
+    "<div class=\"row\" style=\"margin-top:8px\">" +
+    "<a id=\"gConnect\" href=\"/oauth/google/start\" target=\"_blank\"><button class=\"mini\" type=\"button\">3) Conectar / Autorizar</button></a>" +
+    "<button class=\"ghost mini\" id=\"gDisconnect\" type=\"button\">Desconectar</button></div>" +
+    "<div class=\"err\" id=\"gErr\"></div></div>" +
+
+    "<div class=\"item\"><div class=\"top\"><b>💬 WhatsApp</b><span class=\"tag\" id=\"wStatus\">—</span></div>" +
+    "<div class=\"muted\" style=\"margin:8px 0 4px\">No painel da Meta (Webhook → Callback URL):</div>" +
+    "<code id=\"wWebhook\" style=\"display:block;word-break:break-all;font-size:12px;padding:6px\"></code>" +
+    "<div class=\"muted\" style=\"margin:8px 0 4px\">Verify token (use o mesmo na Meta):</div>" +
+    "<code id=\"wVerifyShow\" style=\"display:block;word-break:break-all;font-size:12px;padding:6px\"></code>" +
+    "<form class=\"inline\" id=\"fWhats\" style=\"flex-direction:column;align-items:stretch;margin-top:8px\">" +
+    "<input id=\"wPhone\" placeholder=\"Phone Number ID\">" +
+    "<input id=\"wToken\" type=\"password\" placeholder=\"Access Token (permanente)\">" +
+    "<input id=\"wSecret\" type=\"password\" placeholder=\"App Secret\">" +
+    "<input id=\"wVerifyIn\" placeholder=\"Verify Token (invente um)\">" +
+    "<input id=\"wOwner\" placeholder=\"Seu WhatsApp (ex: 5511999998888)\">" +
+    "<button class=\"mini\">Salvar WhatsApp</button></form>" +
+    "<div class=\"err\" id=\"wErr\"></div></div>" +
+    "</div>" +
+
     "<div class=\"card\"><h2>Memória</h2><div id=\"facts\"></div>" +
     "<form class=\"inline\" id=\"fFact\">" +
     "<input id=\"fcat\" placeholder=\"categoria\" style=\"max-width:110px\">" +
@@ -394,7 +497,7 @@ const DASH_JS = [
   "function api(path,body){return fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();});}",
   // ---- carregar estado ----
   "function load(){return fetch('/painel/api/state').then(function(r){return r.json();}).then(function(s){if(!s.ok)return;S=s;render();});}",
-  "function render(){renderChips();renderLog();renderFacts();renderReminders();renderAgenda();renderUsage();}",
+  "function render(){renderChips();renderLog();renderFacts();renderReminders();renderAgenda();renderUsage();renderIntegrations();}",
   // ---- chips de prontidão ----
   "function renderChips(){var c=document.getElementById('chips');c.innerHTML='';var r=S.readiness;",
   "var defs=[['Claude',r.claude],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected]];",
@@ -417,11 +520,27 @@ const DASH_JS = [
   "function renderAgenda(){var box=document.getElementById('agenda');box.innerHTML='';if(!S.calendarConnected){box.appendChild(el('div','empty','Agenda não conectada. Conecte em /oauth/google/start'));return;}var a=S.agenda||[];if(!a.length){box.appendChild(el('div','empty','(sem eventos hoje)'));return;}a.forEach(function(e){var it=el('div','item');it.appendChild(el('div',null,e.summary));it.appendChild(el('div','muted',e.start+(e.location?(' · '+e.location):'')));box.appendChild(it);});}",
   // ---- uso ----
   "function renderUsage(){var box=document.getElementById('usage');box.innerHTML='';var u=S.usage||{};function row(k,v){var r=el('div','stat');r.appendChild(el('span',null,k));var b=el('b',null,(v||0).toLocaleString('pt-BR'));r.appendChild(b);box.appendChild(r);}row('Chamadas',u.calls);row('Tokens entrada',u.inputTokens);row('Tokens saída',u.outputTokens);row('Cache (leitura)',u.cacheReadTokens);}",
+  // ---- integrações ----
+  "var intInit=false;",
+  "function renderIntegrations(){var ig=(S.integrations)||{};var g=ig.google||{};var w=ig.whatsapp||{};",
+  "document.getElementById('gStatus').textContent=g.connected?'conectada ✓':(g.configured?'pronta p/ autorizar':'não configurada');",
+  "document.getElementById('gRedirect').textContent=g.redirectUri||'(defina PUBLIC_URL no Railway)';",
+  "document.getElementById('gConnect').style.display=g.configured?'':'none';",
+  "document.getElementById('gDisconnect').style.display=g.connected?'':'none';",
+  "document.getElementById('wStatus').textContent=w.configured?'configurado ✓':'não configurado';",
+  "document.getElementById('wWebhook').textContent=w.webhookUrl||'(defina PUBLIC_URL no Railway)';",
+  "document.getElementById('wVerifyShow').textContent=w.verifyToken||'(preencha abaixo)';",
+  "if(!intInit){document.getElementById('gId').value=g.clientId||'';document.getElementById('wPhone').value=w.phoneNumberId||'';document.getElementById('wVerifyIn').value=w.verifyToken||'';document.getElementById('wOwner').value=w.ownerWhatsapp||'';intInit=true;}}",
   // ---- wiring ----
   "document.getElementById('send').addEventListener('click',send);",
   "document.getElementById('input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});",
   "document.getElementById('logout').addEventListener('click',function(){api('/painel/logout',{}).then(function(){location.reload();});});",
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",
   "document.getElementById('fRem').addEventListener('submit',function(e){e.preventDefault();var t=document.getElementById('rtext').value.trim();var w=document.getElementById('rwhen').value;if(!t||!w)return;api('/painel/api/reminders',{text:t,due_at:new Date(w).toISOString()}).then(function(){document.getElementById('rtext').value='';document.getElementById('rwhen').value='';load();});});",
+  // integrações: salvar Google
+  "document.getElementById('fGoogle').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('gErr');err.textContent='';var id=document.getElementById('gId').value.trim();var sec=document.getElementById('gSecret').value.trim();if(!id||!sec){err.textContent='Preencha Client ID e Secret.';return;}api('/painel/api/integrations/google',{clientId:id,clientSecret:sec}).then(function(j){if(j.ok){document.getElementById('gSecret').value='';err.style.color='var(--ok)';err.textContent='Salvo! Agora clique em Conectar / Autorizar.';load();}else{err.style.color='var(--err)';err.textContent=j.error||'Falha.';}});});",
+  "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(load);});",
+  // integrações: salvar WhatsApp
+  "document.getElementById('fWhats').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('wErr');err.textContent='';var phone=document.getElementById('wPhone').value.trim();var tok=document.getElementById('wToken').value.trim();if(!phone||!tok){err.style.color='var(--err)';err.textContent='Phone Number ID e Access Token são obrigatórios.';return;}api('/painel/api/integrations/whatsapp',{phoneNumberId:phone,accessToken:tok,appSecret:document.getElementById('wSecret').value.trim(),verifyToken:document.getElementById('wVerifyIn').value.trim(),ownerWhatsapp:document.getElementById('wOwner').value.trim()}).then(function(j){if(j.ok){document.getElementById('wToken').value='';document.getElementById('wSecret').value='';err.style.color='var(--ok)';err.textContent='WhatsApp salvo! Configure o webhook na Meta com os dados acima.';load();}else{err.style.color='var(--err)';err.textContent=j.error||'Falha.';}});});",
   "load();setInterval(load,30000);",
 ].join("\n");

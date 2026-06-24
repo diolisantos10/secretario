@@ -1,5 +1,6 @@
 /** Ponto de entrada: sobe o servidor e o agendador. */
-import { config, metaReady, anthropicReady, googleReady, panelReady, openaiReady } from "./config";
+import { config, anthropicReady, panelReady, openaiReady } from "./config";
+import { metaReady, googleReady, hydrateCredentials } from "./services/credentials";
 import { log } from "./logger";
 import { prisma } from "./db";
 import { buildApp } from "./server/app";
@@ -26,8 +27,9 @@ function readiness(): void {
 }
 
 async function main(): Promise<void> {
-  readiness();
   await prisma.$connect();
+  await hydrateCredentials(); // carrega credenciais do banco (painel) p/ o cache
+  readiness();
 
   const app = await buildApp();
   await app.listen({ host: "0.0.0.0", port: config.PORT });
