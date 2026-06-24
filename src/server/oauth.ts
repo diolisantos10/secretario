@@ -48,7 +48,7 @@ export async function registerOAuth(app: FastifyInstance): Promise<void> {
       await exchangeCode(code);
       await setSetting("googleOAuthState", "");
       log.info("[oauth] Google Calendar conectado");
-      return reply.type("text/html").send(page("Agenda conectada ✅", "Pode fechar esta aba. Seu secretário já consegue ver e criar eventos."));
+      return reply.redirect("/painel?p=integrations&ok=google");
     } catch (e) {
       log.error("[oauth] troca de código falhou", e);
       return reply.code(500).type("text/html").send(page("Erro ao conectar", "Não consegui finalizar a autorização. Tente novamente."));
