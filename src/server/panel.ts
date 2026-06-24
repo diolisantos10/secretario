@@ -220,6 +220,12 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  app.post("/painel/api/integrations/whatsapp/disconnect", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    await setCredentials({ META_PHONE_NUMBER_ID: "", META_ACCESS_TOKEN: "", META_APP_SECRET: "" });
+    return reply.send({ ok: true });
+  });
+
   // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
   app.get("/painel/api/whatsapp/status", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -358,6 +364,14 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 .toast.show{opacity:1}
 .spin{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+.wa-tabs{display:flex;gap:5px;background:var(--soft);border:1px solid var(--line);border-radius:11px;padding:4px;margin-bottom:16px}
+.wa-tab{flex:1;background:none;border:none;color:var(--mut);font:inherit;font-weight:600;font-size:13px;padding:8px 6px;border-radius:8px;cursor:pointer;transition:background .15s,color .15s}
+.wa-tab:hover{color:var(--fg)}
+.wa-tab.active{background:var(--card);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.steps-ol{color:var(--mut);font-size:13px;margin:0 0 16px;padding-left:18px;line-height:1.75}
+.steps-ol li{margin-bottom:6px}
+.steps-ol b{color:var(--fg)}
 `;
 
 const GOOGLE_G = `<svg viewBox="0 0 24 24" width="26" height="26"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>`;
@@ -481,7 +495,7 @@ function dashboardPage(): string {
             </div>
           </div>
 
-          <!-- WhatsApp (QR Code) -->
+          <!-- WhatsApp -->
           <div class="int-card" id="card-wa">
             <div class="int-head">
               <div class="int-icon wap">${WA_ICON}</div>
@@ -490,40 +504,93 @@ function dashboardPage(): string {
                 <span class="int-badge" id="w-badge">Não conectado</span>
               </div>
             </div>
-            <p class="int-desc">Conecte por QR Code, igual ao WhatsApp Web. Escaneie uma vez e o secretário passa a responder no WhatsApp — inclusive áudios.</p>
 
-            <!-- idle: connect button -->
-            <div id="w-idle">
-              <button class="btn btn-wap btn-full" id="w-connect" type="button">${WA_ICON} &nbsp;Conectar via QR Code</button>
+            <!-- escolha do método -->
+            <div class="wa-tabs">
+              <button class="wa-tab active" type="button" data-wam="qr">Meu número (QR)</button>
+              <button class="wa-tab" type="button" data-wam="meta">Número dedicado</button>
             </div>
 
-            <!-- connecting -->
-            <div id="w-connecting" style="display:none;text-align:center;padding:14px 0">
-              <div class="spin"></div>
-              <p class="muted" style="margin-top:12px">Gerando QR Code...</p>
-            </div>
+            <!-- ===================== Método: QR Code ===================== -->
+            <div id="wa-method-qr">
+              <p class="int-desc">Conecte por QR Code, igual ao WhatsApp Web. Usa o <b>seu próprio número</b> — você fala com o secretário na conversa "você mesmo". Inclui áudio.</p>
 
-            <!-- qr -->
-            <div id="w-qr" style="display:none">
-              <div style="text-align:center"><img id="w-qr-img" alt="QR Code" style="width:240px;height:240px;border-radius:12px;background:#fff;padding:8px"></div>
-              <ol class="muted" style="font-size:13px;margin:14px 0 0;padding-left:20px;line-height:1.9">
-                <li>Abra o <b>WhatsApp</b> no celular que será o secretário</li>
-                <li>Toque em <b>Aparelhos conectados</b> › <b>Conectar aparelho</b></li>
-                <li>Aponte a câmera para este código</li>
-              </ol>
-            </div>
-
-            <!-- open -->
-            <div id="w-open" style="display:none">
-              <div class="ok-row"><span class="ok-dot"></span><span id="w-me">Conectado</span></div>
-              <p class="muted" style="font-size:13px;margin-bottom:10px">✅ Tudo pronto! Fale com o secretário no chat <b>“Conversa com você mesmo”</b> do seu WhatsApp — pode mandar texto ou áudio.</p>
-              <label class="flabel">Quem pode falar com o secretário?</label>
-              <div class="row" style="margin-bottom:6px">
-                <input class="finp" id="w-owner" placeholder="55 11 99999-8888" style="flex:1">
-                <button class="btn btn-pri btn-sm" id="w-owner-save" type="button">Salvar</button>
+              <!-- idle: connect button -->
+              <div id="w-idle">
+                <button class="btn btn-wap btn-full" id="w-connect" type="button">${WA_ICON} &nbsp;Conectar via QR Code</button>
               </div>
-              <p class="muted" style="font-size:12px;margin-bottom:14px">Já configurado com o seu número automaticamente. Mude aqui só se quiser usar outro número (ex.: um WhatsApp dedicado ao secretário).</p>
-              <button class="btn btn-danger btn-sm" id="w-logout" type="button">Desconectar</button>
+
+              <!-- connecting -->
+              <div id="w-connecting" style="display:none;text-align:center;padding:14px 0">
+                <div class="spin"></div>
+                <p class="muted" style="margin-top:12px">Gerando QR Code...</p>
+              </div>
+
+              <!-- qr -->
+              <div id="w-qr" style="display:none">
+                <div style="text-align:center"><img id="w-qr-img" alt="QR Code" style="width:240px;height:240px;border-radius:12px;background:#fff;padding:8px"></div>
+                <ol class="muted" style="font-size:13px;margin:14px 0 0;padding-left:20px;line-height:1.9">
+                  <li>Abra o <b>WhatsApp</b> no celular que será o secretário</li>
+                  <li>Toque em <b>Aparelhos conectados</b> › <b>Conectar aparelho</b></li>
+                  <li>Aponte a câmera para este código</li>
+                </ol>
+              </div>
+
+              <!-- open -->
+              <div id="w-open" style="display:none">
+                <div class="ok-row"><span class="ok-dot"></span><span id="w-me">Conectado</span></div>
+                <p class="muted" style="font-size:13px;margin-bottom:10px">✅ Tudo pronto! Fale com o secretário no chat <b>“Conversa com você mesmo”</b> do seu WhatsApp — pode mandar texto ou áudio.</p>
+                <label class="flabel">Quem pode falar com o secretário?</label>
+                <div class="row" style="margin-bottom:6px">
+                  <input class="finp" id="w-owner" placeholder="55 11 99999-8888" style="flex:1">
+                  <button class="btn btn-pri btn-sm" id="w-owner-save" type="button">Salvar</button>
+                </div>
+                <p class="muted" style="font-size:12px;margin-bottom:14px">Já configurado com o seu número automaticamente. Mude aqui só se quiser usar outro número.</p>
+                <button class="btn btn-danger btn-sm" id="w-logout" type="button">Desconectar</button>
+              </div>
+            </div>
+
+            <!-- ===================== Método: Meta Business API ===================== -->
+            <div id="wa-method-meta" style="display:none">
+              <p class="int-desc">Use um <b>número dedicado</b> ao secretário (a Meta dá um número de teste grátis). Você manda mensagem pra ele como pra qualquer contato.</p>
+
+              <!-- setup -->
+              <div id="m-setup">
+                <ol class="steps-ol">
+                  <li>Crie um app em <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">developers.facebook.com</a> (tipo <b>Empresa</b>) e adicione o produto <b>WhatsApp</b>.</li>
+                  <li>Em <b>WhatsApp › Configuração</b>, na seção de <b>Webhook</b>, clique em "Editar" e cole a URL e o token abaixo. Depois clique em <b>Verificar e salvar</b> e assine o campo <code>messages</code>.</li>
+                </ol>
+
+                <label class="flabel">URL de callback (webhook)</label>
+                <div class="info-row"><span class="info-val" id="m-webhook"></span><button class="cpbtn" type="button" onclick="copyText('m-webhook',this)">Copiar</button></div>
+
+                <label class="flabel">Token de verificação</label>
+                <div class="info-row"><span class="info-val" id="m-verify"></span><button class="cpbtn" type="button" onclick="copyText('m-verify',this)">Copiar</button></div>
+
+                <hr class="sep">
+                <ol class="steps-ol" start="3">
+                  <li>Em <b>WhatsApp › API Setup</b>, copie o <b>Phone number ID</b> e o <b>token de acesso</b> e cole aqui:</li>
+                </ol>
+
+                <form id="fMeta" class="fg">
+                  <div><label class="flabel">Phone number ID</label><input class="finp" id="m-pnid" placeholder="ex.: 123456789012345"></div>
+                  <div><label class="flabel">Token de acesso</label><input class="finp" type="password" id="m-token" placeholder="EAAG..."></div>
+                  <div><label class="flabel">App Secret <span class="muted">(opcional, mais seguro)</span></label><input class="finp" type="password" id="m-secret" placeholder="valida a assinatura dos eventos"></div>
+                  <div><label class="flabel">Seu número (quem fala com o secretário)</label><input class="finp" id="m-owner" placeholder="55 11 99999-8888"></div>
+                  <div class="err" id="m-err"></div>
+                  <button class="btn btn-wap btn-full">Salvar e ativar</button>
+                </form>
+              </div>
+
+              <!-- configurado -->
+              <div id="m-connected" style="display:none">
+                <div class="ok-row"><span class="ok-dot"></span><span id="m-me">WhatsApp (Meta) ativo</span></div>
+                <p class="muted" style="font-size:13px;margin-bottom:12px">Mande uma mensagem do seu WhatsApp para o número do secretário para testar — texto ou áudio.</p>
+                <div class="row">
+                  <button class="btn btn-ghost btn-sm" id="m-edit" type="button">Editar credenciais</button>
+                  <button class="btn btn-danger btn-sm" id="m-disconnect" type="button">Remover</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -616,9 +683,30 @@ const DASH_JS = [
   "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectada ✓';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Pronta — clique para autorizar';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não configurada';if(gSetup)gSetup.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
   "var gIdEl=document.getElementById('gId');if(gIdEl&&g.clientId&&!gIdEl.value)gIdEl.value=g.clientId;",
 
-  // WhatsApp é dirigido pelo seu próprio poller (QR Code).
-  "pollWa();startWaPoll();",
+  // WhatsApp: popula campos do método Meta e decide o método inicial.
+  "var mHook=document.getElementById('m-webhook');if(mHook)mHook.textContent=w.webhookUrl||'(defina a PUBLIC_URL do serviço primeiro)';",
+  "var mVer=document.getElementById('m-verify');if(mVer)mVer.textContent=w.verifyToken||'(gerando...)';",
+  "var mPn=document.getElementById('m-pnid');if(mPn&&w.phoneNumberId&&!mPn.value)mPn.value=w.phoneNumberId;",
+  "var mOw=document.getElementById('m-owner');if(mOw&&w.ownerWhatsapp&&!mOw.value)mOw.value=w.ownerWhatsapp;",
+  "if(!waMethodInit){var saved=null;try{saved=localStorage.getItem('waMethod');}catch(e){}showWaMethod(saved||(w.configured?'meta':'qr'));waMethodInit=true;}",
+  "applyMetaState(w);",
+  "if(waMethod==='qr'){pollWa();startWaPoll();}",
   "}",
+
+  // Alterna entre os métodos QR e Meta dentro do card do WhatsApp.
+  "var waMethod='qr',waMethodInit=false;",
+  "function showWaMethod(m){waMethod=m;try{localStorage.setItem('waMethod',m);}catch(e){}",
+  "var q=document.getElementById('wa-method-qr'),mt=document.getElementById('wa-method-meta');",
+  "if(q)q.style.display=m==='qr'?'block':'none';if(mt)mt.style.display=m==='meta'?'block':'none';",
+  "document.querySelectorAll('.wa-tab').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-wam')===m);});",
+  "if(m==='qr'){pollWa();startWaPoll();}else{stopWaPoll();if(S&&S.integrations&&S.integrations.whatsapp)applyMetaState(S.integrations.whatsapp);}}",
+
+  // Estado do método Meta (setup x configurado) + badge quando este método está ativo.
+  "function applyMetaState(w){var setup=document.getElementById('m-setup'),conn=document.getElementById('m-connected');if(!setup||!conn)return;",
+  "if(w.configured){setup.style.display='none';conn.style.display='block';}else{setup.style.display='block';conn.style.display='none';}",
+  "if(waMethod==='meta'){var card=document.getElementById('card-wa'),badge=document.getElementById('w-badge');",
+  "if(w.configured){card.className='int-card ok-card';badge.className='int-badge ok';badge.textContent='Conectado ✓';}",
+  "else{card.className='int-card';badge.className='int-badge';badge.textContent='Não conectado';}}}",
 
   // ---- WhatsApp QR (poller próprio) ----
   "var waTimer=null;",
@@ -649,6 +737,12 @@ const DASH_JS = [
   "document.getElementById('w-connect').addEventListener('click',function(){applyWa({state:'connecting'});api('/painel/api/whatsapp/connect',{}).then(function(){startWaPoll();setTimeout(pollWa,800);});});",
   "document.getElementById('w-logout').addEventListener('click',function(){if(!confirm('Desconectar o WhatsApp? Você precisará escanear o QR de novo.'))return;api('/painel/api/whatsapp/logout',{}).then(function(){toast('WhatsApp desconectado');applyWa({state:'idle'});});});",
   "document.getElementById('w-owner-save').addEventListener('click',function(){var num=document.getElementById('w-owner').value.trim();if(!num){toast('Informe o número',false);return;}api('/painel/api/whatsapp/owner',{ownerWhatsapp:num}).then(function(j){if(j.ok){toast('Número salvo!');load();}else{toast(j.error||'Falha',false);}});});",
+
+  // Wiring — alternância de método + Meta API
+  "document.querySelectorAll('.wa-tab').forEach(function(b){b.addEventListener('click',function(){showWaMethod(b.getAttribute('data-wam'));});});",
+  "document.getElementById('fMeta').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('m-err');err.className='err';err.textContent='';var pn=document.getElementById('m-pnid').value.trim();var tk=document.getElementById('m-token').value.trim();var sc=document.getElementById('m-secret').value.trim();var ow=document.getElementById('m-owner').value.trim();if(!pn||!tk){err.textContent='Preencha o Phone number ID e o token de acesso.';return;}api('/painel/api/integrations/whatsapp',{phoneNumberId:pn,accessToken:tk,appSecret:sc,ownerWhatsapp:ow}).then(function(j){if(j.ok){toast('WhatsApp (Meta) ativado!');document.getElementById('m-token').value='';document.getElementById('m-secret').value='';load();}else{err.textContent=j.error||'Falha ao salvar.';}});});",
+  "document.getElementById('m-edit').addEventListener('click',function(){document.getElementById('m-connected').style.display='none';document.getElementById('m-setup').style.display='block';});",
+  "document.getElementById('m-disconnect').addEventListener('click',function(){if(!confirm('Remover a configuração da Meta? O secretário deixa de responder por este número.'))return;api('/painel/api/integrations/whatsapp/disconnect',{}).then(function(){toast('Configuração removida');load();});});",
 
   // Wiring — Google disconnect
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Agenda desconectada');load();});});",
