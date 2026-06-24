@@ -5,14 +5,16 @@ import { log } from "./logger";
 import { prisma } from "./db";
 import { buildApp } from "./server/app";
 import { startScheduler } from "./scheduler/cron";
+import { handleIncoming } from "./pipeline";
+import { setMessageHandler, maybeAutoStartWhatsApp, waConnected } from "./whatsapp/baileys";
 
 function readiness(): void {
   const mark = (ok: boolean) => (ok ? "✅" : "⚠️  faltando");
   log.info("=== Secretário — prontidão ===");
   log.info(`Banco de dados ........ ✅`);
   log.info(`Claude (Anthropic) .... ${mark(anthropicReady())}`);
-  log.info(`WhatsApp (Meta) ....... ${mark(metaReady())}`);
-  log.info(`Verify token webhook .. ${mark(Boolean(config.META_VERIFY_TOKEN))}`);
+  log.info(`WhatsApp (QR/Baileys) . ${waConnected() ? "✅ conectado" : "⚠️  conecte pelo painel (QR)"}`);
+  log.info(`WhatsApp (Meta, opc.) . ${mark(metaReady())}`);
   log.info(`Allow-list (dono) ..... ${mark(Boolean(config.OWNER_WHATSAPP))}`);
   log.info(`Agenda (Google) ....... ${mark(googleReady())}`);
   log.info(`Imagens (OpenAI) ...... ${mark(openaiReady())}`);
@@ -21,14 +23,19 @@ function readiness(): void {
   if (panelReady() && config.PUBLIC_URL) {
     log.info(`Painel disponível em ${config.PUBLIC_URL}/painel`);
   }
-  if (!anthropicReady() || !metaReady() || !config.OWNER_WHATSAPP) {
-    log.warn("Itens faltando são a sua parte (credenciais). O serviço sobe e o webhook responde à verificação mesmo assim.");
+  if (!anthropicReady() || (!waConnected() && !metaReady()) || !config.OWNER_WHATSAPP) {
+    log.warn("Itens faltando são a sua parte (conectar o WhatsApp pelo QR no painel). O serviço sobe normalmente.");
   }
 }
 
 async function main(): Promise<void> {
   await prisma.$connect();
   await hydrateCredentials(); // carrega credenciais do banco (painel) p/ o cache
+
+  // WhatsApp via QR: liga o roteamento de mensagens e reconecta se já houver sessão.
+  setMessageHandler((msgs) => void handleIncoming(msgs));
+  await maybeAutoStartWhatsApp();
+
   readiness();
 
   const app = await buildApp();

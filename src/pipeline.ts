@@ -9,7 +9,8 @@
 import { log } from "./logger";
 import { prisma } from "./db";
 import { isOwner, ownerNumber } from "./util/phone";
-import { type IncomingMessage, sendText, sendImage, markRead, downloadMedia } from "./whatsapp/meta";
+import type { IncomingMessage } from "./whatsapp/meta";
+import { sendText, sendImage, markRead, downloadMedia } from "./whatsapp/channel";
 import { alreadyProcessed, saveUserMessage, saveAssistantMessage } from "./services/conversation";
 import { respond, type SecretaryResponse } from "./brain/secretary";
 import { transcribeAudio } from "./services/transcription";
@@ -80,10 +81,17 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
     void markRead(m.waMessageId);
 
     // Áudio: transcreve com Whisper e trata como texto
-    if (m.type === "audio" && m.audioMediaId) {
+    if (m.type === "audio") {
       try {
-        const { buffer, mimeType } = await downloadMedia(m.audioMediaId);
-        const transcription = await transcribeAudio(buffer, m.audioMimeType ?? mimeType);
+        let buffer = m.audioBuffer ?? null;
+        let mime = m.audioMimeType ?? "audio/ogg";
+        if (!buffer && m.audioMediaId) {
+          const dl = await downloadMedia(m.audioMediaId);
+          buffer = dl.buffer;
+          mime = m.audioMimeType ?? dl.mimeType;
+        }
+        if (!buffer) throw new Error("áudio sem conteúdo para transcrever");
+        const transcription = await transcribeAudio(buffer, mime);
         log.info(`[pipeline] áudio transcrito (${transcription.length} chars)`);
         await saveUserMessage(transcription, m.waMessageId);
         sawOwnerText = true;

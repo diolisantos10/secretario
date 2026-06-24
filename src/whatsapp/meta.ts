@@ -18,8 +18,9 @@ export interface IncomingMessage {
   timestamp: Date;
   profileName: string | null;
   phoneNumberId: string | null;
-  audioMediaId?: string; // preenchido quando type === "audio"
+  audioMediaId?: string; // preenchido quando type === "audio" (canal Meta)
   audioMimeType?: string;
+  audioBuffer?: Buffer; // áudio já baixado (canal Baileys/QR)
 }
 
 function graphUrl(path: string): string {

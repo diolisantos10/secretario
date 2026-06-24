@@ -60,6 +60,15 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+/// Estado de autenticação do WhatsApp (Baileys) — sessão do QR Code.
+/// Cada linha é um item da auth state (creds + chaves do protocolo Signal),
+/// serializado com BufferJSON. Permite reconectar após reinício sem reescanear.
+model WaAuth {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 /// Observabilidade: custo/uso por chamada ao modelo.
 model AiLog {
   id               String   @id @default(cuid())

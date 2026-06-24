@@ -5,7 +5,7 @@
  */
 import cron from "node-cron";
 import { config, anthropicReady } from "../config";
-import { metaReady } from "../services/credentials";
+import { canSendWhatsApp } from "../whatsapp/channel";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { dueReminders, markSent } from "../services/reminders";
@@ -23,7 +23,7 @@ async function setSetting(key: string, value: string): Promise<void> {
 
 /** Dispara lembretes vencidos. */
 async function dispatchDueReminders(): Promise<void> {
-  if (!metaReady()) return;
+  if (!canSendWhatsApp()) return;
   const due = await dueReminders();
   for (const r of due) {
     try {
@@ -37,7 +37,7 @@ async function dispatchDueReminders(): Promise<void> {
 
 /** Envia o briefing matinal (uma vez por dia). */
 async function sendDailyBriefing(): Promise<void> {
-  if (!metaReady() || !anthropicReady()) return;
+  if (!canSendWhatsApp() || !anthropicReady()) return;
   const today = todayKey();
   if ((await getSetting("lastBriefing")) === today) return; // já enviado hoje
   try {

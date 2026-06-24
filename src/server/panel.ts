@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config, panelReady, anthropicReady, openaiReady } from "../config";
 import { cred, setCredentials, metaReady, googleReady } from "../services/credentials";
+import { waStatus, startWhatsApp, logoutWhatsApp, waConnected } from "../whatsapp/baileys";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
@@ -103,7 +104,7 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({
       ok: true,
       owner: config.OWNER_NAME,
-      readiness: { claude: anthropicReady(), openai: openaiReady(), whatsapp: metaReady(), calendarConnected: calConnected },
+      readiness: { claude: anthropicReady(), openai: openaiReady(), whatsapp: waConnected() || metaReady(), calendarConnected: calConnected },
       integrations: {
         publicUrl,
         google: {
@@ -219,6 +220,35 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
+  app.get("/painel/api/whatsapp/status", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const st = waStatus();
+    return reply.send({ ok: true, ...st, owner: cred("OWNER_WHATSAPP") });
+  });
+
+  app.post("/painel/api/whatsapp/connect", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    void startWhatsApp();
+    return reply.send({ ok: true });
+  });
+
+  app.post("/painel/api/whatsapp/logout", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    await logoutWhatsApp();
+    return reply.send({ ok: true });
+  });
+
+  // Quem pode falar com o secretário (allow-list). No modo "você mesmo", é o próprio número.
+  app.post("/painel/api/whatsapp/owner", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { ownerWhatsapp?: string };
+    const num = (body.ownerWhatsapp ?? "").trim().replace(/\D/g, "");
+    if (!num) return reply.send({ ok: false, error: "Informe o número." });
+    await setCredentials({ OWNER_WHATSAPP: num });
+    return reply.send({ ok: true });
+  });
+
   log.info("[painel] rotas /painel registradas" + (panelReady() ? "" : " (desativado: defina PANEL_PASSWORD)"));
 }
 
@@ -326,6 +356,8 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:10px 22px;border-radius:999px;font-size:14px;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .3s}
 .toast.show{opacity:1}
+.spin{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 `;
 
 const GOOGLE_G = `<svg viewBox="0 0 24 24" width="26" height="26"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>`;
@@ -449,70 +481,48 @@ function dashboardPage(): string {
             </div>
           </div>
 
-          <!-- WhatsApp -->
+          <!-- WhatsApp (QR Code) -->
           <div class="int-card" id="card-wa">
             <div class="int-head">
               <div class="int-icon wap">${WA_ICON}</div>
               <div>
                 <div class="int-name">WhatsApp</div>
-                <span class="int-badge" id="w-badge">Não configurado</span>
+                <span class="int-badge" id="w-badge">Não conectado</span>
               </div>
             </div>
-            <p class="int-desc">Receba e envie mensagens pelo WhatsApp Business. Fale com o secretário direto do seu WhatsApp.</p>
+            <p class="int-desc">Conecte por QR Code, igual ao WhatsApp Web. Escaneie uma vez e o secretário passa a responder no WhatsApp — inclusive áudios.</p>
 
-            <!-- Not configured: big button -->
-            <div id="w-main">
-              <button class="btn btn-wap btn-full" id="w-setup-btn">${WA_ICON} &nbsp;Configurar WhatsApp</button>
+            <!-- idle: connect button -->
+            <div id="w-idle">
+              <button class="btn btn-wap btn-full" id="w-connect" type="button">${WA_ICON} &nbsp;Conectar via QR Code</button>
             </div>
 
-            <!-- Wizard (hidden until button click or already in progress) -->
-            <div id="w-wizard" style="display:none">
-              <div class="step">
-                <div class="step-n">1</div>
-                <div>
-                  <div class="step-title">URL do Webhook</div>
-                  <div class="step-desc">Cole no Meta for Developers → WhatsApp → Configuração → Webhook:</div>
-                  <div class="info-row"><span class="info-val" id="w-hook"></span><button class="cpbtn" id="w-cp-hook">Copiar</button></div>
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-n">2</div>
-                <div>
-                  <div class="step-title">Verify Token (gerado automaticamente)</div>
-                  <div class="step-desc">Cole no campo "Verify token" na Meta:</div>
-                  <div class="info-row"><span class="info-val" id="w-vtok"></span><button class="cpbtn" id="w-cp-vtok">Copiar</button></div>
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-n">3</div>
-                <div>
-                  <div class="step-title">Abra o Meta for Developers</div>
-                  <div class="step-desc">Configure o webhook com os dados acima e copie o Phone Number ID e Access Token.</div>
-                  <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">
-                    <button class="btn btn-ghost btn-sm" style="margin-top:8px" type="button">Ir para Meta for Developers →</button>
-                  </a>
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-n">4</div>
-                <div>
-                  <div class="step-title">Cole suas credenciais</div>
-                  <form id="fWhats" class="fg" style="margin-top:8px">
-                    <div><label class="flabel">Phone Number ID</label><input class="finp" id="wPhone" placeholder="123456789012345"></div>
-                    <div><label class="flabel">Access Token (permanente)</label><input class="finp" type="password" id="wToken" placeholder="EAAxxxxxx..."></div>
-                    <div><label class="flabel">App Secret <span class="muted">(recomendado)</span></label><input class="finp" type="password" id="wSecret" placeholder="abc123..."></div>
-                    <div><label class="flabel">Seu número do WhatsApp</label><input class="finp" id="wOwner" placeholder="5511999998888"></div>
-                    <div class="err" id="wErr"></div>
-                    <button class="btn btn-wap btn-full">Salvar e ativar WhatsApp</button>
-                  </form>
-                </div>
-              </div>
+            <!-- connecting -->
+            <div id="w-connecting" style="display:none;text-align:center;padding:14px 0">
+              <div class="spin"></div>
+              <p class="muted" style="margin-top:12px">Gerando QR Code...</p>
             </div>
 
-            <!-- Configured state -->
-            <div id="w-configured" style="display:none">
-              <div class="ok-row"><span class="ok-dot"></span>WhatsApp ativo e recebendo mensagens</div>
-              <button class="btn btn-ghost btn-sm" id="w-reconf">Reconfigurar</button>
+            <!-- qr -->
+            <div id="w-qr" style="display:none">
+              <div style="text-align:center"><img id="w-qr-img" alt="QR Code" style="width:240px;height:240px;border-radius:12px;background:#fff;padding:8px"></div>
+              <ol class="muted" style="font-size:13px;margin:14px 0 0;padding-left:20px;line-height:1.9">
+                <li>Abra o <b>WhatsApp</b> no celular que será o secretário</li>
+                <li>Toque em <b>Aparelhos conectados</b> › <b>Conectar aparelho</b></li>
+                <li>Aponte a câmera para este código</li>
+              </ol>
+            </div>
+
+            <!-- open -->
+            <div id="w-open" style="display:none">
+              <div class="ok-row"><span class="ok-dot"></span><span id="w-me">Conectado</span></div>
+              <label class="flabel">Quem pode falar com o secretário?</label>
+              <div class="row" style="margin-bottom:6px">
+                <input class="finp" id="w-owner" placeholder="55 11 99999-8888" style="flex:1">
+                <button class="btn btn-pri btn-sm" id="w-owner-save" type="button">Salvar</button>
+              </div>
+              <p class="muted" style="font-size:12px;margin-bottom:14px">Deixe o <b>seu próprio número</b> para conversar no chat “Conversa com você mesmo”. Ou use outro número, se este for um WhatsApp dedicado ao secretário.</p>
+              <button class="btn btn-danger btn-sm" id="w-logout" type="button">Desconectar</button>
             </div>
           </div>
 
@@ -605,14 +615,20 @@ const DASH_JS = [
   "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectada ✓';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Pronta — clique para autorizar';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não configurada';if(gSetup)gSetup.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
   "var gIdEl=document.getElementById('gId');if(gIdEl&&g.clientId&&!gIdEl.value)gIdEl.value=g.clientId;",
 
-  // WhatsApp states
-  "var wBadge=document.getElementById('w-badge');var wMain=document.getElementById('w-main');var wWiz=document.getElementById('w-wizard');var wOk=document.getElementById('w-configured');var waCard=document.getElementById('card-wa');",
-  "if(wBadge){if(w.configured){if(waCard)waCard.className='int-card ok-card';wBadge.className='int-badge ok';wBadge.textContent='Ativo ✓';if(wMain)wMain.style.display='none';if(wWiz)wWiz.style.display='none';if(wOk)wOk.style.display='';}else{if(waCard)waCard.className='int-card';wBadge.className='int-badge';wBadge.textContent='Não configurado';if(wOk)wOk.style.display='none';}}",
-  "var whookEl=document.getElementById('w-hook');if(whookEl)whookEl.textContent=w.webhookUrl||'(defina PUBLIC_URL no Railway)';",
-  "var wvtEl=document.getElementById('w-vtok');if(wvtEl)wvtEl.textContent=w.verifyToken||'(carregando...)';",
-  "var wPhEl=document.getElementById('wPhone');if(wPhEl&&w.phoneNumberId&&!wPhEl.value)wPhEl.value=w.phoneNumberId;",
-  "var wOwEl=document.getElementById('wOwner');if(wOwEl&&w.ownerWhatsapp&&!wOwEl.value)wOwEl.value=w.ownerWhatsapp;",
+  // WhatsApp é dirigido pelo seu próprio poller (QR Code).
+  "pollWa();startWaPoll();",
   "}",
+
+  // ---- WhatsApp QR (poller próprio) ----
+  "var waTimer=null;",
+  "function startWaPoll(){if(waTimer)return;waTimer=setInterval(function(){if(curPage!=='integrations'){stopWaPoll();return;}pollWa();},2500);}",
+  "function stopWaPoll(){if(waTimer){clearInterval(waTimer);waTimer=null;}}",
+  "function pollWa(){return fetch('/painel/api/whatsapp/status').then(function(r){return r.json();}).then(function(st){if(st&&st.ok)applyWa(st);return st;}).catch(function(){});}",
+  "function applyWa(st){var idle=document.getElementById('w-idle'),conn=document.getElementById('w-connecting'),qr=document.getElementById('w-qr'),open=document.getElementById('w-open'),badge=document.getElementById('w-badge'),card=document.getElementById('card-wa');if(!badge)return;idle.style.display='none';conn.style.display='none';qr.style.display='none';open.style.display='none';var s=st.state||'idle';",
+  "if(s==='open'){card.className='int-card ok-card';badge.className='int-badge ok';badge.textContent='Conectado ✓';open.style.display='block';document.getElementById('w-me').textContent=st.me?('Conectado como +'+st.me):'Conectado';var ow=document.getElementById('w-owner');if(ow&&!ow.value)ow.value=st.owner||st.me||'';stopWaPoll();}",
+  "else if(s==='qr'){card.className='int-card';badge.className='int-badge rdy';badge.textContent='Escaneie o QR';qr.style.display='block';if(st.qr)document.getElementById('w-qr-img').src=st.qr;}",
+  "else if(s==='connecting'){card.className='int-card';badge.className='int-badge rdy';badge.textContent='Conectando...';conn.style.display='block';}",
+  "else{card.className='int-card';badge.className='int-badge';badge.textContent='Não conectado';idle.style.display='block';}}",
 
   // Settings
   "function renderFacts(){var box=document.getElementById('facts');if(!box||!S)return;box.innerHTML='';var f=S.facts||[];if(!f.length){box.appendChild(el('div','empty','(nada memorizado ainda)'));return;}f.forEach(function(x){var it=el('div','item');var top=el('div','itop');var left=el('div');left.appendChild(el('span','tag',x.category));left.appendChild(document.createTextNode(' '+x.key));var b=el('button','btn btn-danger btn-sm','esquecer');b.onclick=function(){api('/painel/api/memory/forget',{key:x.key}).then(load);};top.appendChild(left);top.appendChild(b);it.appendChild(top);it.appendChild(el('div','muted',x.value));box.appendChild(it);});}",
@@ -628,22 +644,16 @@ const DASH_JS = [
   "document.getElementById('send').addEventListener('click',sendMsg);",
   "document.getElementById('inp').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});",
 
-  // Wiring — copy buttons
-  "document.getElementById('w-cp-hook').addEventListener('click',function(){copyText('w-hook',this);});",
-  "document.getElementById('w-cp-vtok').addEventListener('click',function(){copyText('w-vtok',this);});",
-
-  // Wiring — WhatsApp wizard toggle
-  "document.getElementById('w-setup-btn').addEventListener('click',function(){document.getElementById('w-main').style.display='none';document.getElementById('w-wizard').style.display='';});",
-  "document.getElementById('w-reconf').addEventListener('click',function(){document.getElementById('w-configured').style.display='none';document.getElementById('w-wizard').style.display='';});",
+  // Wiring — WhatsApp QR
+  "document.getElementById('w-connect').addEventListener('click',function(){applyWa({state:'connecting'});api('/painel/api/whatsapp/connect',{}).then(function(){startWaPoll();setTimeout(pollWa,800);});});",
+  "document.getElementById('w-logout').addEventListener('click',function(){if(!confirm('Desconectar o WhatsApp? Você precisará escanear o QR de novo.'))return;api('/painel/api/whatsapp/logout',{}).then(function(){toast('WhatsApp desconectado');applyWa({state:'idle'});});});",
+  "document.getElementById('w-owner-save').addEventListener('click',function(){var num=document.getElementById('w-owner').value.trim();if(!num){toast('Informe o número',false);return;}api('/painel/api/whatsapp/owner',{ownerWhatsapp:num}).then(function(j){if(j.ok){toast('Número salvo!');load();}else{toast(j.error||'Falha',false);}});});",
 
   // Wiring — Google disconnect
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Agenda desconectada');load();});});",
 
   // Wiring — Google form
   "document.getElementById('fGoogle').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('gErr');err.textContent='';err.className='err';var id=document.getElementById('gId').value.trim();var sec=document.getElementById('gSecret').value.trim();if(!id||!sec){err.textContent='Preencha Client ID e Secret.';return;}api('/painel/api/integrations/google',{clientId:id,clientSecret:sec}).then(function(j){if(j.ok){err.className='suc';err.textContent='Salvo! Agora clique em Conectar com Google.';document.getElementById('gSecret').value='';load();}else{err.textContent=j.error||'Falha.';}});});",
-
-  // Wiring — WhatsApp form
-  "document.getElementById('fWhats').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('wErr');err.textContent='';err.className='err';var phone=document.getElementById('wPhone').value.trim();var tok=document.getElementById('wToken').value.trim();if(!phone||!tok){err.textContent='Phone Number ID e Access Token são obrigatórios.';return;}var vtok=document.getElementById('w-vtok');api('/painel/api/integrations/whatsapp',{phoneNumberId:phone,accessToken:tok,appSecret:document.getElementById('wSecret').value.trim(),verifyToken:vtok?vtok.textContent:'',ownerWhatsapp:document.getElementById('wOwner').value.trim()}).then(function(j){if(j.ok){document.getElementById('wToken').value='';document.getElementById('wSecret').value='';toast('WhatsApp ativado! O secretário agora responde no WhatsApp.');load();}else{err.textContent=j.error||'Falha.';}});});",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",
