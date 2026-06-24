@@ -122,8 +122,6 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
         google: {
           configured: googleReady(),
           connected: calConnected,
-          clientId: cred("GOOGLE_CLIENT_ID"),
-          redirectUri: cred("GOOGLE_REDIRECT_URI") || (publicUrl ? publicUrl + "/oauth/google/callback" : ""),
         },
         whatsapp: {
           configured: metaReady(),
@@ -197,18 +195,6 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as { id?: string };
     if (!body.id) return reply.send({ ok: false, error: "Informe o id." });
     return reply.send({ ok: await cancelReminder(body.id) });
-  });
-
-  app.post("/painel/api/integrations/google", async (req, reply) => {
-    if (!guard(req, reply)) return;
-    const body = (req.body ?? {}) as { clientId?: string; clientSecret?: string };
-    const clientId = (body.clientId ?? "").trim();
-    const clientSecret = (body.clientSecret ?? "").trim();
-    if (!clientId || !clientSecret) return reply.send({ ok: false, error: "Informe o Client ID e o Client Secret." });
-    const redirectUri = config.PUBLIC_URL ? config.PUBLIC_URL + "/oauth/google/callback" : cred("GOOGLE_REDIRECT_URI");
-    if (!redirectUri) return reply.send({ ok: false, error: "Defina a PUBLIC_URL do serviço primeiro." });
-    await setCredentials({ GOOGLE_CLIENT_ID: clientId, GOOGLE_CLIENT_SECRET: clientSecret, GOOGLE_REDIRECT_URI: redirectUri });
-    return reply.send({ ok: true });
   });
 
   app.post("/painel/api/integrations/google/disconnect", async (req, reply) => {
@@ -613,41 +599,22 @@ function dashboardPage(): string {
               <div class="int-icon ggl">${GOOGLE_G}</div>
               <div>
                 <div class="int-name">Google — Agenda e E-mail</div>
-                <span class="int-badge" id="g-badge">Não configurada</span>
+                <span class="int-badge" id="g-badge">Não conectado</span>
               </div>
             </div>
             <p class="int-desc">Agenda (ver/criar eventos, briefing diário) <b>e Gmail</b> (ler, resumir e enviar e-mails) pelo secretário. Uma autorização libera os dois.</p>
 
-            <!-- Setup form (when no client id) -->
-            <div id="g-setup">
-              <p class="muted" style="font-size:13px;margin-bottom:10px">O Google é a única integração que pede um setup de ~10 min, uma vez só (é regra do Google). Siga o passo a passo:</p>
-              <details class="g-steps">
-                <summary>Ver passo a passo para criar o app do Google</summary>
-                <ol class="steps-ol">
-                  <li>Abra o <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud Console</a> e crie um projeto (qualquer nome).</li>
-                  <li>Em <b>APIs e serviços › Biblioteca</b>, ative <b>Google Calendar API</b> e <b>Gmail API</b>.</li>
-                  <li>Em <b>Tela de consentimento OAuth</b>, escolha <b>Externo</b>, preencha o básico e, em <b>Usuários de teste</b>, adicione o seu próprio e-mail.</li>
-                  <li>Em <b>Credenciais › Criar credenciais › ID do cliente OAuth</b>, tipo <b>Aplicativo da Web</b>.</li>
-                  <li>Em <b>URIs de redirecionamento autorizados</b>, cole exatamente:
-                    <div class="copy-row"><code id="g-redirect">(defina a PUBLIC_URL primeiro)</code><button type="button" class="btn btn-ghost btn-sm" onclick="copyText('g-redirect',this)">Copiar</button></div>
-                  </li>
-                  <li>Copie o <b>Client ID</b> e o <b>Client Secret</b> que aparecem e cole abaixo.</li>
-                </ol>
-              </details>
-              <form id="fGoogle" class="fg" style="margin-top:12px">
-                <div><label class="flabel">Client ID</label><input class="finp" id="gId" placeholder="...apps.googleusercontent.com"></div>
-                <div><label class="flabel">Client Secret</label><input class="finp" type="password" id="gSecret" placeholder="GOCSPX-..."></div>
-                <div class="err" id="gErr"></div>
-                <button class="btn btn-pri btn-full">Salvar e continuar</button>
-              </form>
+            <!-- Not configured (env vars missing) -->
+            <div id="g-not-configured">
+              <p class="muted" style="font-size:13px">Para habilitar, defina <code>GOOGLE_CLIENT_ID</code> e <code>GOOGLE_CLIENT_SECRET</code> nas variáveis de ambiente do Railway e faça um novo deploy.</p>
             </div>
 
-            <!-- Authorize button (configured, not connected) -->
+            <!-- Ready to connect (env vars present, not yet authorized) -->
             <div id="g-connect" style="display:none">
               <a href="/oauth/google/start">
-                <button class="btn btn-ggl btn-full" type="button">${GOOGLE_G} &nbsp;Conectar com Google</button>
+                <button class="btn btn-ggl btn-full" type="button">${GOOGLE_G} &nbsp;Entrar com Google</button>
               </a>
-              <p class="muted" style="font-size:12px;margin-top:8px;text-align:center">Uma janela do Google abrirá — entre e aceite o acesso à Agenda e ao Gmail. Como você é "usuário de teste", pode aparecer um aviso de "app não verificado": clique em <b>Avançado › Acessar (não seguro)</b> — é o seu próprio app.</p>
+              <p class="muted" style="font-size:12px;margin-top:8px;text-align:center">Uma janela do Google vai abrir. Entre na sua conta e aceite o acesso à Agenda e ao Gmail.</p>
             </div>
 
             <!-- Connected state -->
@@ -868,10 +835,8 @@ const DASH_JS = [
   "applyTg(ig.telegram||{});",
 
   // Google states
-  "var gCard=document.getElementById('card-google');var gBadge=document.getElementById('g-badge');var gSetup=document.getElementById('g-setup');var gConn=document.getElementById('g-connect');var gOk=document.getElementById('g-connected');",
-  "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectada ✓';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Pronta — clique para autorizar';if(gSetup)gSetup.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não configurada';if(gSetup)gSetup.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
-  "var gIdEl=document.getElementById('gId');if(gIdEl&&g.clientId&&!gIdEl.value)gIdEl.value=g.clientId;",
-  "var gRd=document.getElementById('g-redirect');if(gRd)gRd.textContent=g.redirectUri||'(defina a PUBLIC_URL do serviço primeiro)';",
+  "var gCard=document.getElementById('card-google');var gBadge=document.getElementById('g-badge');var gNoCfg=document.getElementById('g-not-configured');var gConn=document.getElementById('g-connect');var gOk=document.getElementById('g-connected');",
+  "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectado ✓';if(gNoCfg)gNoCfg.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Clique para entrar';if(gNoCfg)gNoCfg.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não disponível';if(gNoCfg)gNoCfg.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
 
   // WhatsApp: popula campos do método Meta e decide o método inicial.
   "var mHook=document.getElementById('m-webhook');if(mHook)mHook.textContent=w.webhookUrl||'(defina a PUBLIC_URL do serviço primeiro)';",
@@ -953,10 +918,7 @@ const DASH_JS = [
   "['t-logout-w','t-logout-o'].forEach(function(id){var b=document.getElementById(id);if(b)b.addEventListener('click',function(){if(!confirm('Remover o bot do Telegram?'))return;api('/painel/api/integrations/telegram/disconnect',{}).then(function(){toast('Bot removido');stopTgPoll();applyTg({state:'idle'});load();});});});",
 
   // Wiring — Google disconnect
-  "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Agenda desconectada');load();});});",
-
-  // Wiring — Google form
-  "document.getElementById('fGoogle').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('gErr');err.textContent='';err.className='err';var id=document.getElementById('gId').value.trim();var sec=document.getElementById('gSecret').value.trim();if(!id||!sec){err.textContent='Preencha Client ID e Secret.';return;}api('/painel/api/integrations/google',{clientId:id,clientSecret:sec}).then(function(j){if(j.ok){err.className='suc';err.textContent='Salvo! Agora clique em Conectar com Google.';document.getElementById('gSecret').value='';load();}else{err.textContent=j.error||'Falha.';}});});",
+  "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Google desconectado');load();});});",
 
   // Wiring — API keys form
   "document.getElementById('fApiKeys').addEventListener('submit',function(e){e.preventDefault();var ak=document.getElementById('akAnthropic').value.trim();var ok=document.getElementById('akOpenai').value.trim();if(!ak&&!ok){toast('Informe ao menos uma chave.',false);return;}api('/painel/api/config/api-keys',{anthropicKey:ak,openaiKey:ok}).then(function(j){if(j.ok){toast('Chaves salvas!');document.getElementById('akAnthropic').value='';document.getElementById('akOpenai').value='';load();}else{toast(j.error||'Falha.',false);}});});",

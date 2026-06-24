@@ -27,7 +27,7 @@ export async function registerOAuth(app: FastifyInstance): Promise<void> {
       return reply
         .code(503)
         .type("text/html")
-        .send(page("Agenda não configurada", "Faltam as credenciais do Google. Preencha o Client ID e o Client Secret na página de integrações do painel."));
+        .send(page("Agenda não configurada", "Faltam as credenciais do Google. Defina <code>GOOGLE_CLIENT_ID</code> e <code>GOOGLE_CLIENT_SECRET</code> nas variáveis de ambiente do Railway."));
     }
     const state = crypto.randomBytes(16).toString("hex");
     await setSetting("googleOAuthState", state);

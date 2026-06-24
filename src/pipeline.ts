@@ -135,9 +135,10 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
         await saveUserMessage(transcription, m.waMessageId);
         sawOwnerText = true;
       } catch (e) {
+        const errMsg = e instanceof Error ? e.message : "erro desconhecido";
         log.error("[pipeline] falha na transcrição de áudio", e);
-        await saveUserMessage(`[áudio — erro na transcrição]`, m.waMessageId);
-        await deliver("Ouvi seu áudio mas não consegui transcrever agora. Pode repetir escrevendo?").catch(() => {});
+        await saveUserMessage(`[áudio — erro na transcrição: ${errMsg}]`, m.waMessageId);
+        await deliver(`Ouvi seu áudio mas não consegui transcrever: ${errMsg}`).catch(() => {});
       }
       continue;
     }

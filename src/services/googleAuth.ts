@@ -5,6 +5,7 @@
  */
 import { google } from "googleapis";
 import { cred, googleReady } from "./credentials";
+import { config } from "../config";
 import { prisma } from "../db";
 import { encrypt, decrypt } from "../util/crypto";
 import { log } from "../logger";
@@ -16,13 +17,18 @@ const SCOPES = [
 ];
 const TOKEN_ID = "owner";
 
+/** Redirect URI: lê da env (override manual) ou computa a partir da PUBLIC_URL. */
+function redirectUri(): string {
+  return config.GOOGLE_REDIRECT_URI || (config.PUBLIC_URL ? config.PUBLIC_URL + "/oauth/google/callback" : "");
+}
+
 /** Cliente OAuth2 base (sem credenciais). null se o Google não está configurado. */
 function baseClient() {
   if (!googleReady()) return null;
   return new google.auth.OAuth2(
     cred("GOOGLE_CLIENT_ID"),
     cred("GOOGLE_CLIENT_SECRET"),
-    cred("GOOGLE_REDIRECT_URI"),
+    redirectUri(),
   );
 }
 

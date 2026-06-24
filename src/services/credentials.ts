@@ -20,9 +20,6 @@ const PREFIX = "cred:";
 const MANAGED = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
-  "GOOGLE_CLIENT_ID",
-  "GOOGLE_CLIENT_SECRET",
-  "GOOGLE_REDIRECT_URI",
   "ENCRYPTION_KEY",
   "META_PHONE_NUMBER_ID",
   "META_ACCESS_TOKEN",
@@ -94,9 +91,9 @@ export function openaiReady(): boolean {
   return Boolean(cred("OPENAI_API_KEY"));
 }
 
-/** Google Calendar tem as credenciais de app necessárias? */
+/** Google Calendar tem as credenciais de app necessárias? (redirect URI é computada automaticamente) */
 export function googleReady(): boolean {
-  return Boolean(cred("GOOGLE_CLIENT_ID") && cred("GOOGLE_CLIENT_SECRET") && cred("GOOGLE_REDIRECT_URI"));
+  return Boolean(cred("GOOGLE_CLIENT_ID") && cred("GOOGLE_CLIENT_SECRET"));
 }
 
 /** WhatsApp (Meta) pronto para enviar/receber? */
