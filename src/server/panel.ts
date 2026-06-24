@@ -572,7 +572,7 @@ const DASH_JS = [
 
   // Navigation
   "function showPage(name){",
-  "['chat','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'':'none';});",
+  "['chat','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'block':'none';});",
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-page')===name);});",
   "curPage=name;",
   "if(name==='integrations')renderIntegrations();",
