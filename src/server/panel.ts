@@ -282,6 +282,45 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, removed: n });
   });
 
+  // Exporta TODO o contexto (conversa + memória + lembretes + listas + painéis)
+  // como texto — para o dono baixar e compartilhar com o desenvolvedor.
+  app.get("/painel/api/export", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const [msgs, facts, reminders, lists, dashboards] = await Promise.all([
+      prisma.message.findMany({ orderBy: { createdAt: "asc" }, select: { role: true, content: true, createdAt: true } }),
+      loadFacts(),
+      listReminders(),
+      allLists(),
+      allDashboards(),
+    ]);
+    const L: string[] = [];
+    L.push("=== SECRETÁRIO — EXPORTAÇÃO COMPLETA DO CONTEXTO ===", "");
+    L.push(`Dono: ${config.OWNER_NAME}`, `Total de mensagens: ${msgs.length}`, "");
+    L.push("--- CONVERSA (mais antiga → mais recente) ---");
+    for (const m of msgs) {
+      const who = m.role === "user" ? config.OWNER_NAME.toUpperCase() : "SECRETÁRIO";
+      L.push(`[${fmtShort(m.createdAt)}] ${who}: ${m.content}`);
+    }
+    L.push("", "--- MEMÓRIA (fatos de longo prazo) ---");
+    if (!facts.length) L.push("(vazia)");
+    for (const f of facts as any[]) L.push(`• [${f.category}] ${f.key}: ${f.value}`);
+    L.push("", "--- LEMBRETES ---");
+    if (!reminders.length) L.push("(nenhum)");
+    for (const r of reminders) L.push(`• (${r.status}) ${fmtShort(r.dueAt)} — ${r.text}`);
+    L.push("", "--- LISTAS ---");
+    if (!lists.length) L.push("(nenhuma)");
+    for (const l of lists) {
+      L.push(`# ${l.emoji ? l.emoji + " " : ""}${l.name}`);
+      for (const it of l.items) L.push(`  [${it.done ? "x" : " "}] ${it.text}`);
+    }
+    L.push("", "--- PAINÉIS ---");
+    if (!dashboards.length) L.push("(nenhum)");
+    for (const d of dashboards) L.push(`# ${d.emoji ? d.emoji + " " : ""}${d.title}`, `  ${JSON.stringify(d.blocks)}`);
+    reply.header("Content-Type", "text/plain; charset=utf-8");
+    reply.header("Content-Disposition", 'attachment; filename="secretario-contexto.txt"');
+    return reply.send(L.join("\n"));
+  });
+
   // Diagnóstico: últimos updates recebidos do Telegram (para depurar áudio).
   app.get("/painel/api/telegram/debug", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -918,6 +957,11 @@ function dashboardPage(): string {
     <div id="page-settings" class="page">
       <div class="pg">
         <h2 class="pg-title">Configurações</h2>
+        <div class="card" style="margin-bottom:16px">
+          <div class="ctitle">Seus dados</div>
+          <p class="muted" style="margin:0 0 12px">Baixe tudo que o secretário guarda — conversa, memória, lembretes, listas e painéis. Útil como backup e para compartilhar o contexto com o desenvolvedor.</p>
+          <a href="/painel/api/export" download class="btn btn-ghost btn-sm">⬇️ Baixar todo o contexto (.txt)</a>
+        </div>
         <div class="card" style="margin-bottom:16px">
           <div class="ctitle">Chaves de API</div>
           <p class="muted" style="margin:0 0 12px">Cole aqui suas chaves. Elas ficam salvas no banco de dados, não no código.</p>
