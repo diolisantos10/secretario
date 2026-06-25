@@ -150,12 +150,22 @@ function buildMessages(
   return messages;
 }
 
+/** Executa uma promessa de contexto com fallback — nunca derruba a resposta. */
+async function safeCtx<T>(p: Promise<T>, fallback: T, label: string): Promise<T> {
+  try {
+    return await p;
+  } catch (e) {
+    log.warn(`[secretary] contexto "${label}" indisponível`, e);
+    return fallback;
+  }
+}
+
 async function gatherContext(): Promise<string> {
   const [facts, reminders, lists, dashboards] = await Promise.all([
-    loadFacts(),
-    listReminders(),
-    formatListsForContext(),
-    formatDashboardsForContext(),
+    safeCtx(loadFacts(), [], "memória"),
+    safeCtx(listReminders(), [], "lembretes"),
+    safeCtx(formatListsForContext(), "(indisponível agora)", "listas"),
+    safeCtx(formatDashboardsForContext(), "(indisponível agora)", "painéis"),
   ]);
   let agenda = "(agenda do Google não conectada)";
   try {

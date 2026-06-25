@@ -90,9 +90,10 @@ async function process_(): Promise<void> {
       await deliver(response.text, response.imageUrl, response.imageCaption);
     } while (rerun);
   } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
     log.error("[pipeline] falha ao responder", e);
     try {
-      await deliver("Tive um problema aqui para responder agora. Pode repetir daqui a pouco?");
+      await deliver(`Tive um problema aqui para responder agora (${errMsg}). Pode repetir daqui a pouco?`);
     } catch {
       /* sem rede para avisar — já logamos acima */
     }
