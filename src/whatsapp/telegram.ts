@@ -11,9 +11,15 @@
 import { log } from "../logger";
 import { cred, setCredentials } from "../services/credentials";
 import type { IncomingMessage } from "./meta";
+import crypto from "node:crypto";
 
 const API = "https://api.telegram.org";
 const TG_TEXT_LIMIT = 4000; // limite do Telegram é 4096; deixamos folga
+
+/** Identidade deste processo — se mudar entre requisições, há mais de uma réplica. */
+const BOOT_ID = crypto.randomBytes(3).toString("hex");
+const BOOT_AT = Date.now();
+let updatesSeen = 0; // total de updates processados desde o boot
 
 export type TgState = "idle" | "connecting" | "open" | "error";
 
@@ -29,11 +35,12 @@ let onMessage: ((msgs: IncomingMessage[]) => void) | null = null;
 type DebugEntry = { at: string; kind: string; fields: string[]; detail: string };
 const recentUpdates: DebugEntry[] = [];
 function pushDebug(e: DebugEntry): void {
+  updatesSeen++;
   recentUpdates.unshift(e);
   if (recentUpdates.length > 15) recentUpdates.pop();
 }
-export function telegramDebug(): DebugEntry[] {
-  return recentUpdates;
+export function telegramDebug(): { bootId: string; uptimeSec: number; updatesSeen: number; offset: number; updates: DebugEntry[] } {
+  return { bootId: BOOT_ID, uptimeSec: Math.round((Date.now() - BOOT_AT) / 1000), updatesSeen, offset, updates: recentUpdates };
 }
 
 function token(): string {
@@ -51,8 +58,16 @@ export function telegramReady(): boolean {
 export function telegramConnected(): boolean {
   return state === "open";
 }
-export function telegramStatus(): { state: TgState; botUsername: string | null; ownerLinked: boolean; error: string | null } {
-  return { state, botUsername, ownerLinked: Boolean(cred("TELEGRAM_OWNER_CHAT_ID")), error: lastError };
+export function telegramStatus(): { state: TgState; botUsername: string | null; ownerLinked: boolean; error: string | null; bootId: string; uptimeSec: number; updatesSeen: number } {
+  return {
+    state,
+    botUsername,
+    ownerLinked: Boolean(cred("TELEGRAM_OWNER_CHAT_ID")),
+    error: lastError,
+    bootId: BOOT_ID,
+    uptimeSec: Math.round((Date.now() - BOOT_AT) / 1000),
+    updatesSeen,
+  };
 }
 
 // ---------------------------------------------------------------------------

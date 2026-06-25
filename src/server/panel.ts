@@ -273,7 +273,16 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   // Diagnóstico: últimos updates recebidos do Telegram (para depurar áudio).
   app.get("/painel/api/telegram/debug", async (req, reply) => {
     if (!guard(req, reply)) return;
-    return reply.send({ ok: true, updates: telegramDebug() });
+    reply.header("Cache-Control", "no-store, max-age=0");
+    return reply.send({ ok: true, ...telegramDebug() });
+  });
+
+  // Página visual de raio-x do Telegram (auto-refresh, à prova de cache).
+  app.get("/painel/diag", async (req, reply) => {
+    if (!panelReady()) return reply.code(503).type("text/html").send(shell("Painel desativado", "<p>Defina PANEL_PASSWORD.</p>"));
+    if (!isAuthed(req)) return reply.type("text/html").send(loginPage());
+    reply.header("Cache-Control", "no-store, max-age=0");
+    return reply.type("text/html").send(diagPage());
   });
 
   app.post("/painel/api/integrations/telegram/disconnect", async (req, reply) => {
@@ -536,6 +545,43 @@ function loginPage(): string {
       fetch('/painel/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})})
       .then(function(r){return r.json();}).then(function(j){if(j.ok){location.href='/painel';}else{err.textContent=j.error||'Senha incorreta.';}});
     });
+    </script>`);
+}
+
+function diagPage(): string {
+  return shell("Raio-X do Telegram", `
+    <div style="max-width:640px;margin:0 auto;padding:24px 18px">
+      <h2 style="font-size:20px;margin-bottom:4px">🔬 Raio-X do Telegram</h2>
+      <p class="muted" style="font-size:13px;margin-bottom:18px">Atualiza sozinho a cada 2s. Mande um áudio no bot e veja aparecer aqui embaixo.</p>
+      <div class="card" id="diag-status" style="margin-bottom:14px">carregando...</div>
+      <div class="ctitle" style="margin-bottom:8px">Últimas mensagens recebidas</div>
+      <div id="diag-list"></div>
+    </div>
+    <script>
+    function fmtKind(k){if(k==='áudio')return '🎤 áudio';if(k==='texto')return '💬 texto';if(k==='unknown')return '❓ não reconhecido';return k;}
+    function tick(){
+      fetch('/painel/api/telegram/debug',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+        if(!j.ok){document.getElementById('diag-status').textContent='erro';return;}
+        var s=document.getElementById('diag-status');
+        s.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:13px">'
+          +'<span>processo <b>'+j.bootId+'</b></span>'
+          +'<span>no ar há <b>'+j.uptimeSec+'s</b></span>'
+          +'<span>updates vistos: <b>'+j.updatesSeen+'</b></span>'
+          +'<span>offset: <b>'+j.offset+'</b></span></div>';
+        var list=document.getElementById('diag-list');
+        if(!j.updates||!j.updates.length){list.innerHTML='<div class="empty">Nada recebido ainda neste processo. Mande um áudio agora.</div>';return;}
+        list.innerHTML='';
+        j.updates.forEach(function(u){
+          var d=document.createElement('div');d.className='card';d.style.cssText='padding:12px 14px;margin-bottom:8px';
+          d.innerHTML='<div style="font-weight:650;margin-bottom:4px">'+fmtKind(u.kind)+'</div>'
+            +'<div class="muted" style="font-size:12px">campos: '+(u.fields&&u.fields.length?u.fields.join(', '):'(nenhum)')+'</div>'
+            +'<div class="muted" style="font-size:12px">'+(u.detail||'')+'</div>'
+            +'<div class="muted" style="font-size:11px;margin-top:4px">'+u.at+'</div>';
+          list.appendChild(d);
+        });
+      }).catch(function(){});
+    }
+    tick();setInterval(tick,2000);
     </script>`);
 }
 
