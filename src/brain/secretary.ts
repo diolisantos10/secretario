@@ -19,6 +19,7 @@ import { loadFacts, formatFacts } from "../services/memory";
 import { listReminders, formatReminders } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { formatListsForContext } from "../services/lists";
+import { formatDashboardsForContext } from "../services/dashboards";
 
 const MAX_ITERATIONS = 8;
 const IMAGE_PREFIX = "IMAGE_GENERATED::";
@@ -150,7 +151,12 @@ function buildMessages(
 }
 
 async function gatherContext(): Promise<string> {
-  const [facts, reminders, lists] = await Promise.all([loadFacts(), listReminders(), formatListsForContext()]);
+  const [facts, reminders, lists, dashboards] = await Promise.all([
+    loadFacts(),
+    listReminders(),
+    formatListsForContext(),
+    formatDashboardsForContext(),
+  ]);
   let agenda = "(agenda do Google não conectada)";
   try {
     if (await calendarConnected()) {
@@ -167,6 +173,7 @@ async function gatherContext(): Promise<string> {
     reminders: formatReminders(reminders),
     agenda,
     lists,
+    dashboards,
   });
 }
 

@@ -11,6 +11,7 @@ import { clearHistory } from "../services/conversation";
 import { listReminders, createReminder, cancelReminder, completeReminder } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
+import { allDashboards, findDashboard, archiveDashboard } from "../services/dashboards";
 import { runDirectTurn } from "../pipeline";
 import { testOpenAIKey } from "../services/transcription";
 import { testAnthropicKey } from "../brain/secretary";
@@ -94,12 +95,13 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
       try { await setCredentials({ META_VERIFY_TOKEN: verifyToken }); } catch {}
     }
 
-    const [facts, reminders, usage, messages, lists] = await Promise.all([
+    const [facts, reminders, usage, messages, lists, dashboards] = await Promise.all([
       loadFacts(),
       listReminders(),
       prisma.aiLog.aggregate({ _sum: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true }, _count: true }),
       prisma.message.findMany({ orderBy: { createdAt: "desc" }, take: 30, select: { role: true, content: true, createdAt: true } }),
       allLists(),
+      allDashboards(),
     ]);
 
     let calConnected = false;
@@ -150,6 +152,7 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
         openaiHint: maskKey(cred("OPENAI_API_KEY")),
       },
       lists,
+      dashboards,
       facts,
       reminders: reminders.map((r) => ({ id: r.id, text: r.text, status: r.status, dueAt: r.dueAt, due: fmtShort(r.dueAt) })),
       agenda,
@@ -353,6 +356,15 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, id: l.id });
   });
 
+  app.post("/painel/api/dashboards/archive", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { id?: string };
+    const found = body.id ? await findDashboard(body.id) : null;
+    if (!found) return reply.send({ ok: false, error: "Painel não encontrado." });
+    await archiveDashboard(found.id);
+    return reply.send({ ok: true });
+  });
+
   // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
   app.get("/painel/api/whatsapp/status", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -519,6 +531,40 @@ code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px}
 .steps-ol{color:var(--mut);font-size:13px;margin:0 0 16px;padding-left:18px;line-height:1.75}
 .steps-ol li{margin-bottom:6px}
 .steps-ol b{color:var(--fg)}
+
+/* Painéis dinâmicos */
+.dash{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px}
+.dash-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px}
+.dash-title{font-size:18px;font-weight:650}
+.dash-time{font-size:11px;color:var(--mut)}
+.blk{margin-bottom:18px}
+.blk:last-child{margin-bottom:0}
+.blk-h{font-size:15px;font-weight:650;margin-bottom:8px}
+.blk-text{font-size:14px;color:var(--fg);line-height:1.6;white-space:pre-wrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.kpi{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi-label{font-size:12px;color:var(--mut);margin-bottom:6px}
+.kpi-value{font-size:24px;font-weight:700;line-height:1.1}
+.kpi-hint{font-size:12px;color:var(--ok);margin-top:4px}
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable th,.dtable td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+.dtable th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.dtable tr:last-child td{border-bottom:none}
+.dbars{display:flex;flex-direction:column;gap:8px}
+.dbar-row{display:grid;grid-template-columns:90px 1fr 46px;align-items:center;gap:10px;font-size:13px}
+.dbar-track{background:var(--soft);border-radius:6px;height:18px;overflow:hidden}
+.dbar-fill{background:var(--acc);height:100%;border-radius:6px;min-width:2px}
+.dbar-val{text-align:right;color:var(--mut);font-size:12px}
+.dtl{display:flex;flex-direction:column;gap:0}
+.dtl-item{display:flex;gap:12px;padding-bottom:14px;position:relative}
+.dtl-item:not(:last-child)::before{content:'';position:absolute;left:5px;top:14px;bottom:0;width:2px;background:var(--line)}
+.dtl-dot{width:12px;height:12px;border-radius:50%;background:var(--acc);flex-shrink:0;margin-top:2px;z-index:1}
+.dtl-when{font-size:12px;font-weight:650;color:var(--acc);margin-bottom:2px}
+.dtl-text{font-size:14px;line-height:1.5}
+.dchk{display:flex;flex-direction:column;gap:4px}
+.dchk-item{display:flex;align-items:flex-start;gap:9px;font-size:14px;padding:3px 0}
+.dchk-item.done{color:var(--mut);text-decoration:line-through}
+.dchk-box{margin-top:2px;flex-shrink:0}
 `;
 
 const GOOGLE_G = `<svg viewBox="0 0 24 24" width="26" height="26"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>`;
@@ -601,6 +647,7 @@ function dashboardPage(): string {
       <nav class="nav" id="nav">
         <button class="nav-btn active" data-page="chat">Chat</button>
         <button class="nav-btn" data-page="lists">Listas</button>
+        <button class="nav-btn" data-page="dashboards">Painéis</button>
         <button class="nav-btn" data-page="integrations">Integrações</button>
         <button class="nav-btn" data-page="settings">Configurações</button>
       </nav>
@@ -648,6 +695,15 @@ function dashboardPage(): string {
         <h2 class="pg-title">Listas e quadros</h2>
         <p class="muted" style="margin:-8px 0 18px">Criados sob demanda — peça ao secretário pelo WhatsApp/Telegram ou aqui no chat ("faz uma lista de…").</p>
         <div class="lists-grid" id="lists-grid"></div>
+      </div>
+    </div>
+
+    <!-- ===== PAINÉIS ===== -->
+    <div id="page-dashboards" class="page">
+      <div class="pg">
+        <h2 class="pg-title">Painéis</h2>
+        <p class="muted" style="margin:-8px 0 18px">Dashboards de planejamento que o secretário monta sob demanda — peça pelo Telegram ("monta um painel do meu lançamento", "quero acompanhar minhas metas").</p>
+        <div id="dash-wrap"></div>
       </div>
     </div>
 
@@ -919,17 +975,18 @@ const DASH_JS = [
 
   // Navigation
   "function showPage(name){",
-  "['chat','lists','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'block':'none';});",
+  "['chat','lists','dashboards','integrations','settings'].forEach(function(p){var pg=document.getElementById('page-'+p);if(pg)pg.style.display=p===name?'block':'none';});",
   "document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-page')===name);});",
   "curPage=name;",
   "if(name==='lists')renderLists();",
+  "if(name==='dashboards')renderDashboards();",
   "if(name==='integrations')renderIntegrations();",
   "if(name==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}",
   "}",
 
   // Load & render
   "function load(){return fetch('/painel/api/state').then(function(r){return r.json();}).then(function(s){if(!s.ok)return;S=s;render();});}",
-  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='lists')renderLists();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
+  "function render(){renderChips();renderLog();renderAgenda();renderUsage();if(curPage==='lists')renderLists();if(curPage==='dashboards')renderDashboards();if(curPage==='integrations')renderIntegrations();if(curPage==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}}",
 
   // Chips
   "function renderChips(){var c=document.getElementById('chips');if(!c||!S)return;c.innerHTML='';var r=S.readiness;[['Claude',r.claude],['Telegram',r.telegram],['WhatsApp',r.whatsapp],['Agenda',r.calendarConnected],['E-mail',r.calendarConnected]].forEach(function(d){c.appendChild(el('span','chip'+(d[1]?' on':''),d[0]));});}",
@@ -940,6 +997,10 @@ const DASH_JS = [
   "var ul=el('div','list-items');(L.items||[]).forEach(function(it){var row=el('label','list-item'+(it.done?' done':''));var cb=document.createElement('input');cb.type='checkbox';cb.checked=it.done;cb.onchange=function(){api('/painel/api/lists/toggle',{listId:L.id,itemText:it.text,done:cb.checked}).then(function(){it.done=cb.checked;renderLists();});};row.appendChild(cb);row.appendChild(el('span','list-item-tx',it.text));ul.appendChild(row);});card.appendChild(ul);",
   "var ft=el('div','list-foot');var addb=el('button','btn btn-ghost btn-sm','+ item');addb.onclick=function(){var t=prompt('Novo item em \"'+L.name+'\":');if(t&&t.trim()){api('/painel/api/lists/create',{name:L.name,items:[t.trim()]}).then(load);}};var arc=el('button','btn btn-ghost btn-sm','arquivar');arc.onclick=function(){if(!confirm('Arquivar \"'+L.name+'\"?'))return;api('/painel/api/lists/archive',{listId:L.id}).then(function(){toast('Lista arquivada');load();});};ft.appendChild(addb);ft.appendChild(arc);card.appendChild(ft);grid.appendChild(card);});",
   "var nc=el('div','list-card new-list');var nb=el('button','btn btn-pri btn-sm','+ Nova lista');nb.onclick=function(){var nm=prompt('Nome da nova lista:');if(nm&&nm.trim()){api('/painel/api/lists/create',{name:nm.trim()}).then(load);}};nc.appendChild(nb);grid.appendChild(nc);}",
+
+  // Painéis dinâmicos (renderização genérica dos blocos)
+  "function renderDashboards(){var wrap=document.getElementById('dash-wrap');if(!wrap||!S)return;wrap.innerHTML='';var ds=S.dashboards||[];if(!ds.length){wrap.appendChild(el('div','empty','Nenhum painel ainda. Peça ao secretário pelo Telegram: \"monta um painel do meu projeto\".'));return;}ds.forEach(function(D){var card=el('div','dash');var hd=el('div','dash-hd');hd.appendChild(el('div','dash-title',(D.emoji?D.emoji+' ':'')+D.title));var arc=el('button','btn btn-ghost btn-sm','arquivar');arc.onclick=function(){if(!confirm('Arquivar \"'+D.title+'\"?'))return;api('/painel/api/dashboards/archive',{id:D.id}).then(function(){toast('Painel arquivado');load();});};hd.appendChild(arc);card.appendChild(hd);(D.blocks||[]).forEach(function(b){var n=renderBlock(b);if(n)card.appendChild(n);});wrap.appendChild(card);});}",
+  "function renderBlock(b){if(!b||!b.type)return null;var box=el('div','blk');if(b.type==='heading'){box.appendChild(el('div','blk-h',b.text||''));return box;}if(b.type==='text'){box.appendChild(el('div','blk-text',b.text||''));return box;}if(b.type==='kpis'){var g=el('div','kpis');(b.items||[]).forEach(function(k){var c=el('div','kpi');c.appendChild(el('div','kpi-label',k.label||''));c.appendChild(el('div','kpi-value',k.value!=null?String(k.value):''));if(k.hint)c.appendChild(el('div','kpi-hint',k.hint));g.appendChild(c);});box.appendChild(g);return box;}if(b.type==='table'){var t=el('table','dtable');if(b.columns&&b.columns.length){var th=document.createElement('thead');var tr=document.createElement('tr');b.columns.forEach(function(c){var h=document.createElement('th');h.textContent=c;tr.appendChild(h);});th.appendChild(tr);t.appendChild(th);}var tb=document.createElement('tbody');(b.rows||[]).forEach(function(row){var tr=document.createElement('tr');(row||[]).forEach(function(cell){var td=document.createElement('td');td.textContent=cell==null?'':String(cell);tr.appendChild(td);});tb.appendChild(tr);});t.appendChild(tb);box.appendChild(t);return box;}if(b.type==='checklist'){var l=el('div','dchk');(b.items||[]).forEach(function(it){var r=el('div','dchk-item'+(it.done?' done':''));var cb=document.createElement('input');cb.type='checkbox';cb.disabled=true;cb.checked=!!it.done;cb.className='dchk-box';r.appendChild(cb);r.appendChild(el('span',null,it.text||''));l.appendChild(r);});box.appendChild(l);return box;}if(b.type==='bars'){if(b.title)box.appendChild(el('div','blk-h',b.title));var items=b.items||[];var max=1;items.forEach(function(i){var v=Number(i.value)||0;if(v>max)max=v;});var w=el('div','dbars');items.forEach(function(i){var row=el('div','dbar-row');row.appendChild(el('div',null,i.label||''));var track=el('div','dbar-track');var fill=el('div','dbar-fill');fill.style.width=Math.round((Number(i.value)||0)/max*100)+'%';track.appendChild(fill);row.appendChild(track);row.appendChild(el('div','dbar-val',i.value!=null?String(i.value):''));w.appendChild(row);});box.appendChild(w);return box;}if(b.type==='timeline'){var tl=el('div','dtl');(b.items||[]).forEach(function(it){var item=el('div','dtl-item');item.appendChild(el('div','dtl-dot'));var c=el('div');if(it.when)c.appendChild(el('div','dtl-when',it.when));c.appendChild(el('div','dtl-text',it.text||''));item.appendChild(c);tl.appendChild(item);});box.appendChild(tl);return box;}return null;}",
 
   // Chat
   "function renderLog(){var l=document.getElementById('log');if(!l||!S)return;l.innerHTML='';(S.messages||[]).forEach(function(m){addMsg(m.role,m.content,false);});scrollLog();}",

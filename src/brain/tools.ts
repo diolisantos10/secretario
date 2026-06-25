@@ -15,6 +15,7 @@ import { listEvents, createEvent } from "../services/calendar";
 import { listRecent, readEmail, sendEmail } from "../services/gmail";
 import { createList, addItems, setDone, removeItems, archiveList, getList, allLists, findList } from "../services/lists";
 import { readWebpage } from "../services/webreader";
+import { upsertDashboard, findDashboard, getDashboard, allDashboards, archiveDashboard } from "../services/dashboards";
 
 /** Definições das ferramentas custom (o web_search é adicionado no secretary.ts). */
 export const toolDefs = [
@@ -265,6 +266,52 @@ export const toolDefs = [
       required: ["list"],
     },
   },
+  {
+    name: "create_dashboard",
+    description:
+      "Monta ou atualiza um PAINEL visual de planejamento no painel web do dono — para quando uma lista simples não basta: dashboards, planejamentos, acompanhamento de metas, comparativos, cronogramas. Você desenha a interface escolhendo blocos. Use sempre que o dono pedir 'monta um painel/dashboard de X', 'quero acompanhar Y', 'organiza meu plano de Z'. Reaproveita pelo título (atualiza). Aparece como uma página na aba Painéis.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título do painel (ex.: 'Lançamento do curso', 'Metas do trimestre')." },
+        emoji: { type: "string", description: "Um emoji para o painel. Opcional." },
+        mode: { type: "string", description: "'replace' (padrão, redesenha tudo) ou 'append' (adiciona blocos ao fim)." },
+        blocks: {
+          type: "array",
+          description:
+            "Os blocos que compõem o painel, em ordem. Cada bloco é um objeto com 'type' e seus campos:\n" +
+            "• {\"type\":\"heading\",\"text\":\"...\"} — título de seção\n" +
+            "• {\"type\":\"text\",\"text\":\"...\"} — parágrafo/explicação\n" +
+            "• {\"type\":\"kpis\",\"items\":[{\"label\":\"Receita\",\"value\":\"R$ 12k\",\"hint\":\"+8% vs mês\"}]} — cartões de número/indicador\n" +
+            "• {\"type\":\"table\",\"columns\":[\"Tarefa\",\"Prazo\",\"Status\"],\"rows\":[[\"Briefing\",\"10/07\",\"Feito\"]]} — tabela\n" +
+            "• {\"type\":\"checklist\",\"items\":[{\"text\":\"...\",\"done\":false}]} — lista de itens\n" +
+            "• {\"type\":\"bars\",\"title\":\"Vendas\",\"items\":[{\"label\":\"Jan\",\"value\":10}]} — gráfico de barras\n" +
+            "• {\"type\":\"timeline\",\"items\":[{\"when\":\"Semana 1\",\"text\":\"...\"}]} — cronograma/etapas\n" +
+            "Combine quantos blocos precisar para um painel rico e útil.",
+          items: { type: "object" },
+        },
+      },
+      required: ["title", "blocks"],
+    },
+  },
+  {
+    name: "view_dashboard",
+    description: "Mostra o conteúdo atual de um painel (para revisar antes de editar) ou lista todos se nenhum título for dado.",
+    input_schema: {
+      type: "object",
+      properties: { title: { type: "string", description: "Título ou id curto do painel. Opcional." } },
+      required: [],
+    },
+  },
+  {
+    name: "archive_dashboard",
+    description: "Arquiva um painel que não é mais necessário (some da aba Painéis).",
+    input_schema: {
+      type: "object",
+      properties: { title: { type: "string", description: "Título ou id curto do painel." } },
+      required: ["title"],
+    },
+  },
 ] as const;
 
 /** Mensagem padrão quando o Google (agenda/e-mail) não está conectado. */
@@ -413,6 +460,33 @@ export async function executeTool(name: string, input: any): Promise<string> {
         if (!found) return `Lista "${input.list}" não encontrada.`;
         await archiveList(found.id);
         return `Lista "${found.name}" arquivada.`;
+      }
+      case "create_dashboard": {
+        const d = await upsertDashboard({
+          title: input.title,
+          emoji: input.emoji,
+          blocks: input.blocks,
+          mode: input.mode === "append" ? "append" : "replace",
+        });
+        return `Painel "${d.title}" pronto (id ${d.id.slice(-6)}) com ${d.blocks.length} bloco(s). Aparece na aba Painéis.`;
+      }
+      case "view_dashboard": {
+        if (input.title) {
+          const found = await findDashboard(input.title);
+          if (!found) return `Painel "${input.title}" não encontrado.`;
+          const d = await getDashboard(found.id);
+          if (!d) return `Painel "${input.title}" não encontrado.`;
+          return `${d.emoji ? d.emoji + " " : ""}${d.title} (id ${d.id.slice(-6)}):\n${JSON.stringify(d.blocks, null, 2)}`;
+        }
+        const ds = await allDashboards();
+        if (!ds.length) return "Nenhum painel criado ainda.";
+        return ds.map((d) => `${d.emoji ? d.emoji + " " : ""}${d.title} (id ${d.id.slice(-6)}, ${d.blocks.length} bloco(s))`).join("\n");
+      }
+      case "archive_dashboard": {
+        const found = await findDashboard(input.title);
+        if (!found) return `Painel "${input.title}" não encontrado.`;
+        await archiveDashboard(found.id);
+        return `Painel "${found.title}" arquivado.`;
       }
       default:
         return `Ferramenta desconhecida: ${name}`;

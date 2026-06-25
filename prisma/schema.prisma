@@ -91,6 +91,22 @@ model ListItem {
   @@index([listId])
 }
 
+/// Painéis dinâmicos que o secretário monta sob demanda (planejamento, KPIs,
+/// tabelas, cronogramas, gráficos). `blocks` é um JSON serializado com a
+/// estrutura visual; o painel web renderiza genericamente, sem código novo a
+/// cada demanda — o agente "desenha" a interface a partir de pedidos em texto.
+model Dashboard {
+  id        String   @id @default(cuid())
+  title     String
+  emoji     String?
+  blocks    String   @default("[]") // JSON serializado dos blocos
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([archived, updatedAt])
+}
+
 /// Estado de autenticação do WhatsApp (Baileys) — sessão do QR Code.
 /// Cada linha é um item da auth state (creds + chaves do protocolo Signal),
 /// serializado com BufferJSON. Permite reconectar após reinício sem reescanear.
