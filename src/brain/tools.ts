@@ -14,6 +14,7 @@ import {
 import { listEvents, createEvent } from "../services/calendar";
 import { listRecent, readEmail, sendEmail } from "../services/gmail";
 import { createList, addItems, setDone, removeItems, archiveList, getList, allLists, findList } from "../services/lists";
+import { readWebpage } from "../services/webreader";
 
 /** Definições das ferramentas custom (o web_search é adicionado no secretary.ts). */
 export const toolDefs = [
@@ -135,6 +136,18 @@ export const toolDefs = [
         },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "read_webpage",
+    description:
+      "Abre um link (URL) e lê o conteúdo da página, devolvendo o texto principal. Use SEMPRE que o dono mandar um link e quiser que você leia, resuma, comente ou extraia algo dele — notícias, artigos, posts, produtos, documentos. Funciona também para muitas páginas de redes sociais. Para perguntas gerais sem um link específico, prefira a busca na web.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "O endereço da página a ler (ex.: https://...)." },
+      },
+      required: ["url"],
     },
   },
   {
@@ -318,6 +331,11 @@ export async function executeTool(name: string, input: any): Promise<string> {
         const url = await generateImage(input.prompt);
         const caption = (input.caption ?? "").trim();
         return `IMAGE_GENERATED::${url}::${caption}`;
+      }
+      case "read_webpage": {
+        const page = await readWebpage(input.url);
+        const head = page.title ? `Título: ${page.title}\n` : "";
+        return `${head}URL: ${page.url}\n\n${page.text}`;
       }
       case "list_emails": {
         const emails = await listRecent(input.query || "in:inbox", input.max || 10);
