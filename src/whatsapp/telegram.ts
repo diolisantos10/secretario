@@ -209,8 +209,9 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
       return { ...base, type: "audio", text: "", audioBuffer: buffer, audioMimeType: mime };
     } catch (e) {
       log.error("[telegram] falha ao baixar áudio", e);
-      // Return null so o pipeline não tenta transcrever um buffer vazio.
-      return null;
+      const errMsg = e instanceof Error ? e.message : "erro";
+      // Retorna como texto de erro para que o pipeline possa avisar o dono.
+      return { ...base, type: "text", text: `[voz — não consegui baixar: ${errMsg}]` };
     }
   }
 
