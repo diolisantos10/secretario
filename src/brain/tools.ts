@@ -333,9 +333,21 @@ export async function executeTool(name: string, input: any): Promise<string> {
         return `IMAGE_GENERATED::${url}::${caption}`;
       }
       case "read_webpage": {
-        const page = await readWebpage(input.url);
-        const head = page.title ? `Título: ${page.title}\n` : "";
-        return `${head}URL: ${page.url}\n\n${page.text}`;
+        try {
+          const page = await readWebpage(input.url);
+          const head = page.title ? `Título: ${page.title}\n` : "";
+          return `${head}URL: ${page.url}\n\n${page.text}`;
+        } catch (e) {
+          let host = "";
+          try {
+            host = new URL(/^https?:\/\//i.test(input.url) ? input.url : "https://" + input.url).hostname.replace(/^www\./, "");
+          } catch {}
+          const walled = /(^|\.)(linkedin\.com|instagram\.com|facebook\.com|tiktok\.com|x\.com|twitter\.com|threads\.net)$/i.test(host);
+          if (walled) {
+            return `A página ${host} bloqueia leitura automática (exige login mesmo quando o conteúdo é público). NÃO desista nem diga apenas que não consegue: use AGORA a busca na web (web_search) com o endereço "${input.url}" e o nome/identificador que aparece nele, para trazer as informações públicas indexadas, e responda o dono com base no que encontrar. Só se a busca também não trouxer nada útil, explique em uma frase que ${host} não permite leitura sem login.`;
+          }
+          throw e;
+        }
       }
       case "list_emails": {
         const emails = await listRecent(input.query || "in:inbox", input.max || 10);
