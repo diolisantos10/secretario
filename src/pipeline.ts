@@ -137,7 +137,7 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
           await deliver("Recebi o áudio mas o Whisper não devolveu nenhum texto. Tenta falar um pouco mais alto/perto?").catch(() => {});
           continue;
         }
-        await saveUserMessage(transcription, m.waMessageId);
+        await saveUserMessage(`🎤 ${transcription}`, m.waMessageId);
         sawOwnerText = true;
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : "erro desconhecido";

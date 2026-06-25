@@ -29,6 +29,12 @@ export async function saveAssistantMessage(content: string): Promise<void> {
   await prisma.message.create({ data: { role: "assistant", content } });
 }
 
+/** Apaga o histórico de bate-papo (não mexe em memória, lembretes ou listas). */
+export async function clearHistory(): Promise<number> {
+  const r = await prisma.message.deleteMany({});
+  return r.count;
+}
+
 /** Últimos turnos em ordem cronológica, prontos para o array `messages` do Claude. */
 export async function loadHistory(): Promise<ChatTurn[]> {
   const rows = await prisma.message.findMany({

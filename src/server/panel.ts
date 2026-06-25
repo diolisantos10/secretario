@@ -7,6 +7,7 @@ import { telegramStatus, startTelegram, logoutTelegram, telegramConnected, teleg
 import { log } from "../logger";
 import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
+import { clearHistory } from "../services/conversation";
 import { listReminders, createReminder, cancelReminder, completeReminder } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
@@ -268,6 +269,13 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   app.get("/painel/api/telegram/status", async (req, reply) => {
     if (!guard(req, reply)) return;
     return reply.send({ ok: true, ...telegramStatus() });
+  });
+
+  // Limpa o histórico de bate-papo (recomeça a conversa sem perder memória).
+  app.post("/painel/api/chat/clear", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const n = await clearHistory();
+    return reply.send({ ok: true, removed: n });
   });
 
   // Diagnóstico: últimos updates recebidos do Telegram (para depurar áudio).
@@ -609,7 +617,10 @@ function dashboardPage(): string {
       <div class="pg">
         <div class="chat-layout">
           <div class="chat-card">
-            <div class="chat-hdr">Conversa — mesmo secretário do WhatsApp</div>
+            <div class="chat-hdr" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span>Conversa — mesmo secretário do WhatsApp/Telegram</span>
+              <button class="btn btn-ghost btn-sm" id="clearChat" type="button" title="Recomeçar a conversa (mantém memória e lembretes)">Limpar conversa</button>
+            </div>
             <div class="chat-log" id="log"></div>
             <div class="chat-err" id="chatErr"></div>
             <div class="chat-compose">
@@ -1014,6 +1025,7 @@ const DASH_JS = [
 
   // Wiring — chat
   "document.getElementById('send').addEventListener('click',sendMsg);",
+  "document.getElementById('clearChat').addEventListener('click',function(){if(!confirm('Recomeçar a conversa? Isso apaga o bate-papo recente, mas mantém memória, lembretes e listas.'))return;api('/painel/api/chat/clear',{}).then(function(j){if(j.ok){toast('Conversa reiniciada');load();}else{toast(j.error||'Falha',false);}});});",
   "document.getElementById('inp').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});",
 
   // Wiring — WhatsApp QR
