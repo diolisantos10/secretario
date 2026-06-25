@@ -11,7 +11,7 @@ import { clearHistory } from "../services/conversation";
 import { listReminders, createReminder, cancelReminder, completeReminder } from "../services/reminders";
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
-import { allDashboards, findDashboard, archiveDashboard } from "../services/dashboards";
+import { allDashboards, findDashboard, archiveDashboard, upsertDashboard } from "../services/dashboards";
 import { runJobSearchNow, getJobSearchBrief, setJobSearchBrief } from "../scheduler/cron";
 import { runDirectTurn } from "../pipeline";
 import { testOpenAIKey } from "../services/transcription";
@@ -405,6 +405,158 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Cria/atualiza os painéis das 5 frentes da vida do Diego (seed de contexto).
+  app.post("/painel/api/seed/life", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const today = new Date();
+    const rentDue = new Date("2026-07-10T12:00:00-03:00");
+    const daysLeft = Math.max(0, Math.ceil((rentDue.getTime() - today.getTime()) / 86_400_000));
+
+    const seeds = [
+      {
+        title: "Situação Jun/2026",
+        emoji: "🚨",
+        blocks: [
+          { type: "kpis", items: [
+            { label: "Aluguel vence", value: "10 jul", hint: daysLeft > 0 ? `⚠️ em ${daysLeft} dias` : "⚠️ HOJE" },
+            { label: "Renda atual", value: "R$ 0", hint: "amigo cobre o básico" },
+            { label: "Meta mensal", value: "R$ 5.000", hint: "emprego remoto" },
+            { label: "Frentes ativas", value: "5", hint: "em paralelo" },
+          ]},
+          { type: "heading", text: "5 Frentes em Paralelo" },
+          { type: "timeline", items: [
+            { when: "AGORA — URGENTE", text: "🏠 Anunciar quarto (Pinheiros) — renda imediata" },
+            { when: "AGORA — URGENTE", text: "💼 Candidaturas diárias — varejo/CS remoto R$5k+, PT+EN" },
+            { when: "AGORA", text: "🎭 Audições — Valestour pendente + novos castings" },
+            { when: "1-4 semanas", text: "💻 Freelance pontual — 99freela, Workana, comunicação" },
+            { when: "2-3 meses", text: "🤖 FUT Restaurantes — piloto ativo, expandir para +2 clientes" },
+          ]},
+        ],
+      },
+      {
+        title: "Quarto Pinheiros — Anúncio",
+        emoji: "🏠",
+        blocks: [
+          { type: "kpis", items: [
+            { label: "Potencial mensal", value: "R$ 1.800", hint: "quarto mobiliado SP" },
+            { label: "Airbnb diária", value: "~R$ 120", hint: "temporada curta" },
+            { label: "Prioridade", value: "🔴 Alta", hint: "renda mais rápida" },
+          ]},
+          { type: "heading", text: "Checklist — Publicar o anúncio" },
+          { type: "checklist", items: [
+            { text: "Tirar fotos (luz natural, ambiente limpo e arrumado)", done: false },
+            { text: "Definir preço (mensal fixo ou diária Airbnb — ou ambos)", done: false },
+            { text: "Publicar no OLX (gratuito, alto tráfego)", done: false },
+            { text: "Publicar no QuintoAndar (mais filtrado, profissional)", done: false },
+            { text: "Cadastrar no Airbnb para temporada curta", done: false },
+            { text: "Postar em grupos SP: Expats, Digital Nomads SP, Moradia SP", done: false },
+            { text: "Avisar rede pessoal (LinkedIn + WhatsApp)", done: false },
+          ]},
+          { type: "heading", text: "Anúncio em Português" },
+          { type: "text", text: "🏠 QUARTO PARA ALUGAR — Pinheiros, São Paulo\n\nQuarto privativo mobiliado em apartamento bem localizado em Pinheiros, um dos bairros mais desejados de SP — próximo ao metrô, à Faria Lima e à Vila Madalena.\n\n✅ Quarto privativo com cama\n✅ Áreas comuns (cozinha, sala, banheiro)\n✅ Internet Wi-Fi inclusa\n✅ Ambiente tranquilo e acolhedor\n✅ Ideal para profissionais, estudantes e viajantes\n\nValor: sob consulta\nContato: [SEU NOME] — [TELEFONE/WHATSAPP]" },
+          { type: "heading", text: "Anúncio em Inglês" },
+          { type: "text", text: "🏠 PRIVATE ROOM FOR RENT — Pinheiros, São Paulo\n\nFurnished private room in a welcoming apartment in Pinheiros, one of São Paulo's most vibrant neighborhoods — close to metro, Faria Lima, and Vila Madalena.\n\n✅ Private room with bed\n✅ Shared kitchen, living room, bathroom\n✅ Wi-Fi included\n✅ Quiet environment, perfect for professionals and digital nomads\n✅ Easy access to public transit and the whole city\n\nPrice: negotiable\nContact: [YOUR NAME] — [PHONE/WHATSAPP]" },
+        ],
+      },
+      {
+        title: "Emprego Remoto — Pipeline",
+        emoji: "💼",
+        blocks: [
+          { type: "kpis", items: [
+            { label: "Meta salarial", value: "R$ 5k+", hint: "ou USD/EUR equiv." },
+            { label: "Candidaturas/dia", value: "5", hint: "meta mínima" },
+            { label: "Inglês", value: "B2", hint: "diferencial forte" },
+          ]},
+          { type: "heading", text: "Cargos-alvo" },
+          { type: "checklist", items: [
+            { text: "Customer Success Manager (remoto)", done: false },
+            { text: "Account / Key Account Manager (remoto)", done: false },
+            { text: "Coordenador / Gerente Comercial (remoto)", done: false },
+            { text: "Trade Marketing / E-commerce (remoto)", done: false },
+            { text: "Sales Rep Bilíngue PT-EN (vagas internacionais)", done: false },
+            { text: "Apresentador / Locutor remoto (diferencial de ator)", done: false },
+          ]},
+          { type: "heading", text: "Plataformas — acionar esta semana" },
+          { type: "table", columns: ["Plataforma", "Foco", "Ação"], rows: [
+            ["LinkedIn", "Vagas corporativas", "OpenToWork + 5 candidaturas/dia"],
+            ["Indeed", "Varejo + CS remoto", "Criar perfil + alertas de vaga"],
+            ["Gupy", "Empresas BR", "Cadastrar + salvar busca"],
+            ["Workana", "Freelance internacional", "Criar perfil PT-EN"],
+            ["99freela", "Freelance BR", "Cadastrar"],
+            ["Remote.com", "Vagas 100% remoto", "Buscar customer success"],
+            ["Catho", "Vagas seniores BR", "Atualizar currículo"],
+          ]},
+          { type: "heading", text: "Empresas com fit alto" },
+          { type: "table", columns: ["Empresa", "Setor", "Por que combina"], rows: [
+            ["Alpargatas / Havaianas", "Moda/Varejo", "Ex-gerente — histórico direto"],
+            ["LVMH / Sephora BR", "Beleza Premium", "Ex-Sephora — referência forte"],
+            ["Arezzo&Co", "Moda/Calçados", "Ex-consultor — portfólio direto"],
+            ["Magazine Luiza / VTEX", "E-commerce", "Varejo + digital + remoto"],
+            ["Totvs / Conta Azul", "SaaS B2B", "CS senior + inglês"],
+          ]},
+        ],
+      },
+      {
+        title: "FUT — IA para Restaurantes",
+        emoji: "🤖",
+        blocks: [
+          { type: "text", text: "Produto de IA para gestão de restaurantes. Piloto ativo no restaurante do amigo. Foco: documentar resultados e conseguir mais 2-3 pilotos para provar o modelo." },
+          { type: "kpis", items: [
+            { label: "Status", value: "Piloto ✅", hint: "1 restaurante ativo" },
+            { label: "Meta curto", value: "+2 pilotos", hint: "próx. 60 dias" },
+            { label: "Receita atual", value: "R$ 0", hint: "fase pré-receita" },
+          ]},
+          { type: "heading", text: "Próximas ações (maior impacto)" },
+          { type: "checklist", items: [
+            { text: "Documentar métricas do piloto (tempo, custo, satisfação)", done: false },
+            { text: "Criar 1-pager com resultado do piloto para novos clientes", done: false },
+            { text: "Identificar 3 restaurantes para propor piloto grátis/simbólico", done: false },
+            { text: "Definir modelo de cobrança (mensalidade / % / por uso)", done: false },
+            { text: "Montar pitch de 5 min para convencer próximo restaurante", done: false },
+          ]},
+          { type: "heading", text: "Roadmap FUT" },
+          { type: "timeline", items: [
+            { when: "Hoje", text: "Piloto ativo em 1 restaurante — validação real" },
+            { when: "Jul 2026", text: "Documentar resultados + pitch deck básico" },
+            { when: "Ago 2026", text: "Expandir para 2-3 restaurantes" },
+            { when: "Set 2026", text: "Primeira receita recorrente" },
+            { when: "Dez 2026", text: "5+ restaurantes ativos, modelo sustentável" },
+          ]},
+        ],
+      },
+      {
+        title: "Carreira de Ator",
+        emoji: "🎭",
+        blocks: [
+          { type: "text", text: "Ator com DRT e formação na Célia Helena. Excelente comunicação — diferencial também para locução, apresentação e vagas bilíngues." },
+          { type: "kpis", items: [
+            { label: "DRT", value: "Ativo", hint: "profissional registrado" },
+            { label: "Formação", value: "Célia Helena", hint: "referência nacional" },
+            { label: "Status", value: "Em audições", hint: "Valestour pendente" },
+          ]},
+          { type: "heading", text: "Audições em andamento" },
+          { type: "checklist", items: [
+            { text: "Valestour — aguardando resultado da audição", done: false },
+            { text: "Checar agenda de castings (Talent SP, Actor SP)", done: false },
+            { text: "Renovar fotos de book se necessário", done: false },
+          ]},
+          { type: "heading", text: "Usar comunicação como renda paralela" },
+          { type: "checklist", items: [
+            { text: "Locutor/narrador remoto: Voices.com, PodCastal, Voz do Universo", done: false },
+            { text: "Apresentador de conteúdo EAD / treinamento corporativo", done: false },
+            { text: "MC e apresentador de eventos de varejo (Havaianas, feiras)", done: false },
+          ]},
+        ],
+      },
+    ];
+
+    for (const d of seeds) {
+      await upsertDashboard({ ...d, mode: "replace" });
+    }
+
+    return reply.send({ ok: true, created: seeds.length });
+  });
+
   // Dispara a busca de vagas na hora (resultado chega no Telegram e no chat).
   app.post("/painel/api/jobs/run", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -767,7 +919,13 @@ function dashboardPage(): string {
     <div id="page-dashboards" class="page">
       <div class="pg">
         <h2 class="pg-title">Painéis</h2>
-        <p class="muted" style="margin:-8px 0 18px">Dashboards de planejamento que o secretário monta sob demanda — peça pelo Telegram ("monta um painel do meu lançamento", "quero acompanhar minhas metas").</p>
+        <p class="muted" style="margin:-8px 0 18px">Dashboards de planejamento criados automaticamente ou sob demanda pelo secretário.</p>
+        <div class="card" style="margin-bottom:18px">
+          <div class="ctitle">Situação de vida — Diego</div>
+          <p class="muted" style="font-size:13px;margin:0 0 12px">Cria (ou atualiza) os 5 painéis das suas frentes atuais: situação financeira, quarto para alugar, emprego remoto, FUT e carreira de ator.</p>
+          <button type="button" id="btnSeedLife" class="btn btn-pri btn-sm">🎯 Montar minha situação</button>
+          <div id="seedMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+        </div>
         <div id="dash-wrap"></div>
       </div>
     </div>
@@ -1202,6 +1360,7 @@ const DASH_JS = [
   "function loadJobBrief(){var t=document.getElementById('jobBrief');if(!t||t.value.trim())return;fetch('/painel/api/jobs/brief').then(function(r){return r.json();}).then(function(j){if(j.ok&&!t.value.trim())t.value=j.brief||'';}).catch(function(){});}",
   "var sb=document.getElementById('btnSaveBrief');if(sb)sb.addEventListener('click',function(){var t=document.getElementById('jobBrief');var m=document.getElementById('briefMsg');if(!t.value.trim()){if(m){m.style.color='var(--err)';m.textContent='Escreva o perfil.';}return;}api('/painel/api/jobs/brief',{brief:t.value}).then(function(j){if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?'Perfil salvo! A próxima busca usa ele.':(j.error||'Falha.');}});});",
   "var bj2=document.getElementById('btnJobs2');if(bj2)bj2.addEventListener('click',function(){var m=document.getElementById('briefMsg');bj2.disabled=true;if(m){m.style.color='var(--mut)';m.textContent='Buscando vagas... chega no Telegram e no chat em ~1 min.';}api('/painel/api/jobs/run',{}).then(function(j){bj2.disabled=false;if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?'Busca disparada! Veja no Telegram/chat.':(j.error||'Falha.');}});});",
+  "var bsl=document.getElementById('btnSeedLife');if(bsl)bsl.addEventListener('click',function(){var m=document.getElementById('seedMsg');bsl.disabled=true;if(m){m.style.color='var(--mut)';m.textContent='Criando painéis...';}api('/painel/api/seed/life',{}).then(function(j){bsl.disabled=false;if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?('✓ '+j.created+' painéis criados/atualizados! Veja abaixo.'):(j.error||'Falha.');}if(j.ok)setTimeout(function(){load();renderDashboards();},600);}).catch(function(){bsl.disabled=false;if(m){m.style.color='var(--err)';m.textContent='Erro de rede.';}});});",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",
