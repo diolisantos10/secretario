@@ -23,18 +23,18 @@ function redirectUri(): string {
 }
 
 /** Cliente OAuth2 base (sem credenciais). null se o Google não está configurado. */
-function baseClient() {
+function baseClient(overrideRedirectUri?: string) {
   if (!googleReady()) return null;
   return new google.auth.OAuth2(
     cred("GOOGLE_CLIENT_ID"),
     cred("GOOGLE_CLIENT_SECRET"),
-    redirectUri(),
+    overrideRedirectUri || redirectUri(),
   );
 }
 
 /** URL de consentimento (offline + prompt consent para garantir refresh_token). */
-export function buildAuthUrl(state: string): string | null {
-  const client = baseClient();
+export function buildAuthUrl(state: string, overrideRedirectUri?: string): string | null {
+  const client = baseClient(overrideRedirectUri);
   if (!client) return null;
   return client.generateAuthUrl({
     access_type: "offline",
@@ -45,8 +45,8 @@ export function buildAuthUrl(state: string): string | null {
 }
 
 /** Troca o `code` por tokens e os persiste cifrados. */
-export async function exchangeCode(code: string): Promise<void> {
-  const client = baseClient();
+export async function exchangeCode(code: string, overrideRedirectUri?: string): Promise<void> {
+  const client = baseClient(overrideRedirectUri);
   if (!client) throw new Error("Google não configurado.");
   const { tokens } = await client.getToken(code);
   await saveCredentials(tokens);

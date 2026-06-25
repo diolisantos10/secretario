@@ -111,7 +111,9 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
       }
     } catch (e) { log.debug("[painel] agenda indisponível", e); }
 
-    const publicUrl = config.PUBLIC_URL || "";
+    const proto = ((req.headers["x-forwarded-proto"] as string) || "https").split(",")[0].trim();
+    const host = (req.headers["x-forwarded-host"] as string) || req.hostname;
+    const publicUrl = config.PUBLIC_URL || `${proto}://${host}`;
     const tg = telegramStatus();
     return reply.send({
       ok: true,

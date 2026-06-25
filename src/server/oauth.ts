@@ -1,6 +1,6 @@
 /** Rotas de OAuth do Google Calendar (conectar a agenda uma única vez). */
 import crypto from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { googleReady } from "../services/credentials";
 import { log } from "../logger";
 import { prisma } from "../db";
@@ -12,6 +12,13 @@ async function getSetting(key: string): Promise<string | null> {
 }
 async function setSetting(key: string, value: string): Promise<void> {
   await prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/** Deriva a redirect URI a partir dos headers da requisição (funciona atrás de proxy/Railway). */
+function deriveRedirectUri(req: FastifyRequest): string {
+  const proto = ((req.headers["x-forwarded-proto"] as string) || "https").split(",")[0].trim();
+  const host = (req.headers["x-forwarded-host"] as string) || req.hostname;
+  return `${proto}://${host}/oauth/google/callback`;
 }
 
 function page(title: string, body: string): string {
@@ -27,11 +34,13 @@ export async function registerOAuth(app: FastifyInstance): Promise<void> {
       return reply
         .code(503)
         .type("text/html")
-        .send(page("Agenda não configurada", "Faltam as credenciais do Google. Defina <code>GOOGLE_CLIENT_ID</code> e <code>GOOGLE_CLIENT_SECRET</code> nas variáveis de ambiente do Railway."));
+        .send(page("Google não configurado", "Configure o Client ID e o Client Secret no painel do secretário."));
     }
     const state = crypto.randomBytes(16).toString("hex");
     await setSetting("googleOAuthState", state);
-    const url = buildAuthUrl(state);
+    const callbackUri = deriveRedirectUri(req);
+    await setSetting("googleOAuthRedirectUri", callbackUri);
+    const url = buildAuthUrl(state, callbackUri);
     if (!url) return reply.code(503).type("text/html").send(page("Indisponível", "Não foi possível gerar o link de autorização."));
     return reply.redirect(url);
   });
@@ -45,9 +54,10 @@ export async function registerOAuth(app: FastifyInstance): Promise<void> {
       return reply.code(400).type("text/html").send(page("Falha na verificação", "O parâmetro de segurança (state) não confere. Tente abrir o link novamente."));
     }
     try {
-      await exchangeCode(code);
+      const callbackUri = await getSetting("googleOAuthRedirectUri") || deriveRedirectUri(req);
+      await exchangeCode(code, callbackUri);
       await setSetting("googleOAuthState", "");
-      log.info("[oauth] Google Calendar conectado");
+      log.info("[oauth] Google conectado");
       return reply.redirect("/painel?p=integrations&ok=google");
     } catch (e) {
       log.error("[oauth] troca de código falhou", e);
