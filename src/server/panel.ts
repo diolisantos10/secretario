@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config, panelReady } from "../config";
 import { cred, setCredentials, metaReady, googleReady, anthropicReady, openaiReady } from "../services/credentials";
 import { waStatus, startWhatsApp, logoutWhatsApp, waConnected } from "../whatsapp/baileys";
-import { telegramStatus, startTelegram, logoutTelegram, telegramConnected } from "../whatsapp/telegram";
+import { telegramStatus, startTelegram, logoutTelegram, telegramConnected, telegramDebug } from "../whatsapp/telegram";
 import { log } from "../logger";
 import { prisma } from "../db";
 import { loadFacts, saveFact, forgetFact } from "../services/memory";
@@ -268,6 +268,12 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   app.get("/painel/api/telegram/status", async (req, reply) => {
     if (!guard(req, reply)) return;
     return reply.send({ ok: true, ...telegramStatus() });
+  });
+
+  // Diagnóstico: últimos updates recebidos do Telegram (para depurar áudio).
+  app.get("/painel/api/telegram/debug", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    return reply.send({ ok: true, updates: telegramDebug() });
   });
 
   app.post("/painel/api/integrations/telegram/disconnect", async (req, reply) => {

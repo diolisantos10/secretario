@@ -25,6 +25,17 @@ let offset = 0;
 let lastError: string | null = null;
 let onMessage: ((msgs: IncomingMessage[]) => void) | null = null;
 
+/** Buffer circular dos últimos updates (diagnóstico — visível no painel). */
+type DebugEntry = { at: string; kind: string; fields: string[]; detail: string };
+const recentUpdates: DebugEntry[] = [];
+function pushDebug(e: DebugEntry): void {
+  recentUpdates.unshift(e);
+  if (recentUpdates.length > 15) recentUpdates.pop();
+}
+export function telegramDebug(): DebugEntry[] {
+  return recentUpdates;
+}
+
 function token(): string {
   return cred("TELEGRAM_BOT_TOKEN");
 }
@@ -181,8 +192,12 @@ export async function maybeAutoStartTelegram(): Promise<void> {
 
 async function toIncoming(u: any): Promise<IncomingMessage | null> {
   const msg = u?.message;
-  if (!msg || !msg.chat) return null;
+  if (!msg || !msg.chat) {
+    pushDebug({ at: new Date().toISOString(), kind: "sem-message", fields: Object.keys(u || {}), detail: "" });
+    return null;
+  }
   const chatId = String(msg.chat.id);
+  const msgFields = Object.keys(msg).filter((k) => !["message_id", "from", "chat", "date"].includes(k));
   // Só conversa privada 1:1 (ignora grupos/canais).
   if (msg.chat.type && msg.chat.type !== "private") return null;
 
@@ -200,12 +215,15 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
     phoneNumberId: null,
   };
 
-  // Voz / áudio: baixa o binário (Whisper transcreve depois).
-  const voice = msg.voice || msg.audio;
+  // Voz / áudio (gravação, arquivo de música, nota de vídeo, ou doc com mime de áudio).
+  const docIsAudio = msg.document && /^audio\//i.test(msg.document.mime_type || "");
+  const voice = msg.voice || msg.audio || msg.video_note || (docIsAudio ? msg.document : null);
   if (voice?.file_id) {
+    pushDebug({ at: new Date().toISOString(), kind: "áudio", fields: msgFields, detail: voice.mime_type || "audio/ogg" });
     try {
       const buffer = await downloadFile(voice.file_id);
       const mime = (voice.mime_type || "audio/ogg").split(";")[0];
+      log.info(`[telegram] áudio recebido (${buffer.length} bytes, ${mime})`);
       return { ...base, type: "audio", text: "", audioBuffer: buffer, audioMimeType: mime };
     } catch (e) {
       log.error("[telegram] falha ao baixar áudio", e);
@@ -217,8 +235,13 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
 
   let text = msg.text || msg.caption || "";
   if (text.trim() === "/start") text = "Olá!"; // primeira mensagem padrão do Telegram
-  if (text) return { ...base, type: "text", text };
+  if (text) {
+    pushDebug({ at: new Date().toISOString(), kind: "texto", fields: msgFields, detail: `${text.length} chars` });
+    return { ...base, type: "text", text };
+  }
 
+  pushDebug({ at: new Date().toISOString(), kind: "unknown", fields: msgFields, detail: JSON.stringify(msg).slice(0, 200) });
+  log.warn(`[telegram] update não reconhecido — campos: ${msgFields.join(", ")}`);
   return { ...base, type: "unknown", text: "" };
 }
 
