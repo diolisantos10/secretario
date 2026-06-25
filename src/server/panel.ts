@@ -12,6 +12,7 @@ import { listReminders, createReminder, cancelReminder, completeReminder } from 
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
 import { allDashboards, findDashboard, archiveDashboard } from "../services/dashboards";
+import { runJobSearchNow } from "../scheduler/cron";
 import { runDirectTurn } from "../pipeline";
 import { testOpenAIKey } from "../services/transcription";
 import { testAnthropicKey } from "../brain/secretary";
@@ -365,6 +366,13 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Dispara a busca de vagas na hora (resultado chega no Telegram e no chat).
+  app.post("/painel/api/jobs/run", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    void runJobSearchNow().catch((e) => log.error("[painel] busca manual de vagas falhou", e));
+    return reply.send({ ok: true });
+  });
+
   // WhatsApp via QR Code (Baileys) — conectar/estado/desconectar.
   app.get("/painel/api/whatsapp/status", async (req, reply) => {
     if (!guard(req, reply)) return;
@@ -676,6 +684,11 @@ function dashboardPage(): string {
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:16px;overflow-y:auto">
+            <div class="card">
+              <div class="ctitle">Ações rápidas</div>
+              <button class="btn btn-pri btn-full btn-sm" id="btnJobs" type="button">💼 Buscar vagas agora</button>
+              <div id="jobsMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+            </div>
             <div class="card">
               <div class="ctitle">Agenda de hoje</div>
               <div id="agenda"></div>
@@ -1086,6 +1099,7 @@ const DASH_JS = [
 
   // Wiring — chat
   "document.getElementById('send').addEventListener('click',sendMsg);",
+  "var bj=document.getElementById('btnJobs');if(bj)bj.addEventListener('click',function(){var m=document.getElementById('jobsMsg');bj.disabled=true;if(m){m.style.color='var(--mut)';m.textContent='Buscando vagas na web... chega no seu Telegram e aqui no chat em ~1 min.';}api('/painel/api/jobs/run',{}).then(function(j){bj.disabled=false;if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?'Busca disparada! As vagas vão aparecer no Telegram e no chat.':(j.error||'Falha.');}setTimeout(load,10000);}).catch(function(){bj.disabled=false;if(m){m.style.color='var(--err)';m.textContent='Erro de rede.';}});});",
   "document.getElementById('clearChat').addEventListener('click',function(){if(!confirm('Recomeçar a conversa? Isso apaga o bate-papo recente, mas mantém memória, lembretes e listas.'))return;api('/painel/api/chat/clear',{}).then(function(j){if(j.ok){toast('Conversa reiniciada');load();}else{toast(j.error||'Falha',false);}});});",
   "document.getElementById('inp').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});",
 

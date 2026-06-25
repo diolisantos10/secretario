@@ -24,14 +24,15 @@ const schema = z.object({
   OWNER_NAME: z.string().default("chefe"),
   TIMEZONE: z.string().default("America/Sao_Paulo"),
   BRIEFING_TIME: z.string().default("07:30"), // HH:MM no fuso acima; vazio desliga
+  JOB_SEARCH_TIME: z.string().default("09:00"), // HH:MM — busca diária de vagas; vazio desliga
 
   // OpenAI (geração de imagens com DALL-E 3)
   OPENAI_API_KEY: z.string().optional(),
 
   // Claude (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default("claude-opus-4-8"),
-  ANTHROPIC_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  ANTHROPIC_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   ENABLE_WEB_SEARCH: z.coerce.boolean().default(true),
 
   // Meta WhatsApp Cloud API

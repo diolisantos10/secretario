@@ -191,12 +191,25 @@ function baseParams(messages: any[]) {
   return {
     model: config.ANTHROPIC_MODEL,
     max_tokens: 8000,
-    thinking: { type: "adaptive" },
-    output_config: { effort: config.ANTHROPIC_EFFORT },
+    ...thinkingParams(),
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [...toolDefs, ...webSearchTool()],
     messages,
   };
+}
+
+/**
+ * Parâmetros de raciocínio por modelo. O Opus 4.8 tem thinking adaptativo e
+ * esforço configurável (output_config); Sonnet/Haiku usam thinking estendido
+ * com orçamento fixo. Sem isso, trocar de modelo quebraria com erro 400.
+ */
+function thinkingParams(): Record<string, any> {
+  if (config.ANTHROPIC_MODEL.includes("opus-4-8")) {
+    return { thinking: { type: "adaptive" }, output_config: { effort: config.ANTHROPIC_EFFORT } };
+  }
+  // Sonnet/Haiku: orçamento de raciocínio proporcional ao "effort" pedido.
+  const budget = config.ANTHROPIC_EFFORT === "low" ? 0 : config.ANTHROPIC_EFFORT === "high" ? 4000 : 2000;
+  return budget > 0 ? { thinking: { type: "enabled", budget_tokens: budget } } : {};
 }
 
 /**
@@ -283,11 +296,50 @@ export async function composeProactive(instruction: string): Promise<string> {
   const res: any = await c.messages.create({
     model: config.ANTHROPIC_MODEL,
     max_tokens: 4000,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "medium" },
+    ...thinkingParams(),
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages,
   } as any);
   await logUsage(res);
   return extractText(res.content);
+}
+
+/**
+ * Como composeProactive, mas roda o laço agêntico com ferramentas (inclusive
+ * busca na web) — para rotinas que precisam SAIR e buscar de verdade, como a
+ * busca diária de vagas. Devolve o texto final pronto para enviar.
+ */
+export async function composeWithSearch(instruction: string): Promise<string> {
+  const c = getClient();
+  const contextText = await gatherContext();
+  const messages: any[] = [
+    { role: "user", content: `${instruction}\n\n<contexto>\n${contextText}\n</contexto>` },
+  ];
+  let finalText = "";
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const stream = c.messages.stream(baseParams(messages) as any);
+    const msg = await stream.finalMessage();
+    await logUsage(msg);
+    messages.push({ role: "assistant", content: msg.content });
+
+    if (msg.stop_reason === "pause_turn") continue;
+    if (msg.stop_reason === "refusal") {
+      finalText = "Não consegui completar a busca agora.";
+      break;
+    }
+    if (msg.stop_reason === "tool_use") {
+      const results: any[] = [];
+      for (const block of msg.content) {
+        if (block?.type === "tool_use") {
+          const out = await executeTool(block.name, block.input);
+          results.push({ type: "tool_result", tool_use_id: block.id, content: out });
+        }
+      }
+      messages.push({ role: "user", content: results });
+      continue;
+    }
+    finalText = extractText(msg.content);
+    break;
+  }
+  return finalText;
 }
