@@ -29,6 +29,14 @@ export interface SecretaryResponse {
   imageCaption?: string;
 }
 
+/** Anexo multimodal do turno atual (imagem para visão, PDF para leitura). */
+export interface Attachment {
+  kind: "image" | "document";
+  base64: string;
+  mimeType: string;
+  name?: string;
+}
+
 let client: Anthropic | null = null;
 let lastApiKey = "";
 function getClient(): Anthropic {
@@ -90,7 +98,12 @@ async function logUsage(msg: any): Promise<void> {
 }
 
 /** Monta o array de mensagens. Garante início em 'user' e injeta o contexto. */
-function buildMessages(history: ChatTurn[], contextText: string, systemAsMessage: boolean): any[] {
+function buildMessages(
+  history: ChatTurn[],
+  contextText: string,
+  systemAsMessage: boolean,
+  attachments: Attachment[] = [],
+): any[] {
   let hist = history.slice();
   while (hist.length && hist[0].role !== "user") hist = hist.slice(1);
 
@@ -101,11 +114,37 @@ function buildMessages(history: ChatTurn[], contextText: string, systemAsMessage
   } else {
     // Fallback: anexa o contexto ao último turno do usuário.
     const last = messages[messages.length - 1];
-    if (last && last.role === "user") {
+    if (last && last.role === "user" && typeof last.content === "string") {
       last.content = `${last.content}\n\n<contexto>\n${contextText}\n</contexto>`;
     } else {
       messages.push({ role: "user", content: `<contexto>\n${contextText}\n</contexto>` });
     }
+  }
+
+  // Anexos do turno (imagem/PDF): injeta como blocks na última mensagem do usuário.
+  if (attachments.length) {
+    let idx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { idx = i; break; }
+    }
+    if (idx === -1) { messages.push({ role: "user", content: "" }); idx = messages.length - 1; }
+    const m = messages[idx];
+    const textPart = typeof m.content === "string" ? m.content : "";
+    const blocks: any[] = [];
+    if (textPart.trim()) blocks.push({ type: "text", text: textPart });
+    for (const a of attachments) {
+      if (a.kind === "image") {
+        blocks.push({ type: "image", source: { type: "base64", media_type: a.mimeType, data: a.base64 } });
+      } else {
+        blocks.push({
+          type: "document",
+          source: { type: "base64", media_type: a.mimeType, data: a.base64 },
+          ...(a.name ? { title: a.name } : {}),
+        });
+      }
+    }
+    if (!blocks.some((b) => b.type === "text")) blocks.unshift({ type: "text", text: "Segue o anexo." });
+    m.content = blocks;
   }
   return messages;
 }
@@ -147,13 +186,13 @@ function baseParams(messages: any[]) {
  * Processa a conversa atual (histórico já inclui a última mensagem do dono) e
  * devolve a resposta. Persistir/enviar é responsabilidade de quem chama.
  */
-export async function respond(): Promise<SecretaryResponse> {
+export async function respond(attachments: Attachment[] = []): Promise<SecretaryResponse> {
   const c = getClient();
   const history = await loadHistory();
   const contextText = await gatherContext();
 
   let systemAsMessage = config.ANTHROPIC_MODEL.includes("opus-4-8");
-  let messages = buildMessages(history, contextText, systemAsMessage);
+  let messages = buildMessages(history, contextText, systemAsMessage, attachments);
 
   let finalText = "";
   let pendingImageUrl: string | undefined;
@@ -169,7 +208,7 @@ export async function respond(): Promise<SecretaryResponse> {
       if (systemAsMessage && e instanceof Anthropic.BadRequestError && /system/i.test(e.message)) {
         log.warn("[secretary] modelo sem system mid-conversation — usando fallback de contexto");
         systemAsMessage = false;
-        messages = buildMessages(history, contextText, false);
+        messages = buildMessages(history, contextText, false, attachments);
         i--;
         continue;
       }

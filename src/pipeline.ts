@@ -14,8 +14,14 @@ import type { IncomingMessage } from "./whatsapp/meta";
 import { sendText, sendImage, markRead, downloadMedia } from "./whatsapp/channel";
 import { sendTextTG, sendImageTG, telegramConnected } from "./whatsapp/telegram";
 import { alreadyProcessed, saveUserMessage, saveAssistantMessage } from "./services/conversation";
-import { respond, type SecretaryResponse } from "./brain/secretary";
+import { respond, type SecretaryResponse, type Attachment } from "./brain/secretary";
 import { transcribeAudio } from "./services/transcription";
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // limite prático da API de visão
+const MAX_PDF_BYTES = 20 * 1024 * 1024; // limite de download do Telegram
+
+/** Anexos (imagem/PDF) do turno atual, repassados ao cérebro. */
+let pendingAttachments: Attachment[] = [];
 
 const DEBOUNCE_MS = 1200;
 
@@ -77,7 +83,9 @@ async function process_(): Promise<void> {
     do {
       rerun = false;
       if (!(await hasPendingUser())) break;
-      const response = await respond();
+      const atts = pendingAttachments;
+      pendingAttachments = [];
+      const response = await respond(atts);
       await saveAssistantMessage(response.text);
       await deliver(response.text, response.imageUrl, response.imageCaption);
     } while (rerun);
@@ -144,6 +152,57 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
         log.error("[pipeline] falha na transcrição de áudio", e);
         await saveUserMessage(`[áudio — erro na transcrição: ${errMsg}]`, m.waMessageId);
         await deliver(`Ouvi seu áudio mas não consegui transcrever: ${errMsg}`).catch(() => {});
+      }
+      continue;
+    }
+
+    // Imagem: o Claude enxerga nativamente — anexa ao turno.
+    if (m.type === "image") {
+      const buf = m.imageBuffer ?? null;
+      if (!buf) {
+        await saveUserMessage("[imagem sem conteúdo]", m.waMessageId);
+        await deliver("Recebi uma imagem mas ela veio vazia. Pode reenviar?").catch(() => {});
+        continue;
+      }
+      if (buf.length > MAX_IMAGE_BYTES) {
+        await saveUserMessage("[imagem grande demais]", m.waMessageId);
+        await deliver("Essa imagem passou de 5 MB. Manda uma versão um pouco menor que eu analiso.").catch(() => {});
+        continue;
+      }
+      const caption = (m.text || "").trim();
+      pendingAttachments.push({ kind: "image", base64: buf.toString("base64"), mimeType: m.imageMimeType || "image/jpeg" });
+      await saveUserMessage(caption ? `🖼️ ${caption}` : "🖼️ [imagem]", m.waMessageId);
+      sawOwnerText = true;
+      continue;
+    }
+
+    // Documento: PDF e texto vão direto ao Claude; outros formatos, aviso claro.
+    if (m.type === "document") {
+      const buf = m.docBuffer ?? null;
+      const mime = (m.docMimeType || "application/octet-stream").toLowerCase();
+      const name = m.docName || "documento";
+      if (!buf) {
+        await saveUserMessage("[documento sem conteúdo]", m.waMessageId);
+        await deliver("Recebi um arquivo mas ele veio vazio. Pode reenviar?").catch(() => {});
+        continue;
+      }
+      const caption = (m.text || "").trim();
+      if (mime === "application/pdf") {
+        if (buf.length > MAX_PDF_BYTES) {
+          await saveUserMessage(`[PDF grande demais: ${name}]`, m.waMessageId);
+          await deliver("Esse PDF passou de 20 MB e o Telegram não deixa baixar. Dá pra mandar uma versão menor ou só as páginas que importam?").catch(() => {});
+          continue;
+        }
+        pendingAttachments.push({ kind: "document", base64: buf.toString("base64"), mimeType: "application/pdf", name });
+        await saveUserMessage(`📄 ${name}${caption ? ` — ${caption}` : ""}`, m.waMessageId);
+        sawOwnerText = true;
+      } else if (mime.startsWith("text/") || mime === "application/json") {
+        const txt = buf.toString("utf8").slice(0, 12000);
+        await saveUserMessage(`📄 ${name}${caption ? ` — ${caption}` : ""}:\n${txt}`, m.waMessageId);
+        sawOwnerText = true;
+      } else {
+        await saveUserMessage(`[documento ${mime} não suportado: ${name}]`, m.waMessageId);
+        await deliver(`Recebi "${name}", mas por enquanto leio PDF, imagens e arquivos de texto — esse é ${mime}. Se der, exporta como PDF que eu leio.`).catch(() => {});
       }
       continue;
     }

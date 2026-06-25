@@ -248,6 +248,39 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
     }
   }
 
+  // Foto (pega a maior resolução) ou documento de imagem → visão do Claude.
+  const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+  const docIsImage = msg.document && /^image\//i.test(msg.document.mime_type || "");
+  const imageFile = photo || (docIsImage ? msg.document : null);
+  if (imageFile?.file_id) {
+    pushDebug({ at: new Date().toISOString(), kind: "imagem", fields: msgFields, detail: msg.document?.mime_type || "image/jpeg" });
+    try {
+      const buffer = await downloadFile(imageFile.file_id);
+      const mime = photo ? "image/jpeg" : (msg.document.mime_type || "image/jpeg").split(";")[0];
+      log.info(`[telegram] imagem recebida (${buffer.length} bytes, ${mime})`);
+      return { ...base, type: "image", text: msg.caption || "", imageBuffer: buffer, imageMimeType: mime };
+    } catch (e) {
+      log.error("[telegram] falha ao baixar imagem", e);
+      const errMsg = e instanceof Error ? e.message : "erro";
+      return { ...base, type: "text", text: `[imagem — não consegui baixar: ${errMsg}. Arquivos acima de 20 MB não passam pelo Telegram.]` };
+    }
+  }
+
+  // Documento (PDF e outros arquivos).
+  if (msg.document?.file_id) {
+    const mime = (msg.document.mime_type || "application/octet-stream").split(";")[0];
+    pushDebug({ at: new Date().toISOString(), kind: "documento", fields: msgFields, detail: `${mime} ${msg.document.file_name || ""}` });
+    try {
+      const buffer = await downloadFile(msg.document.file_id);
+      log.info(`[telegram] documento recebido (${buffer.length} bytes, ${mime})`);
+      return { ...base, type: "document", text: msg.caption || "", docBuffer: buffer, docMimeType: mime, docName: msg.document.file_name || "arquivo" };
+    } catch (e) {
+      log.error("[telegram] falha ao baixar documento", e);
+      const errMsg = e instanceof Error ? e.message : "erro";
+      return { ...base, type: "text", text: `[documento — não consegui baixar: ${errMsg}. Arquivos acima de 20 MB não passam pelo Telegram.]` };
+    }
+  }
+
   let text = msg.text || msg.caption || "";
   if (text.trim() === "/start") text = "Olá!"; // primeira mensagem padrão do Telegram
   if (text) {

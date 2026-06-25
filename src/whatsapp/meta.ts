@@ -23,6 +23,11 @@ export interface IncomingMessage {
   audioMediaId?: string; // preenchido quando type === "audio" (canal Meta)
   audioMimeType?: string;
   audioBuffer?: Buffer; // áudio já baixado (canal Baileys/QR/Telegram)
+  imageBuffer?: Buffer; // imagem já baixada (type === "image")
+  imageMimeType?: string;
+  docBuffer?: Buffer; // documento já baixado (type === "document")
+  docMimeType?: string;
+  docName?: string;
 }
 
 function graphUrl(path: string): string {
