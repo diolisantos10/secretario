@@ -132,6 +132,11 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
         if (!buffer) throw new Error("áudio sem conteúdo para transcrever");
         const transcription = await transcribeAudio(buffer, mime);
         log.info(`[pipeline] áudio transcrito (${transcription.length} chars)`);
+        if (!transcription.trim()) {
+          await saveUserMessage("[áudio vazio — Whisper não retornou texto]", m.waMessageId);
+          await deliver("Recebi o áudio mas o Whisper não devolveu nenhum texto. Tenta falar um pouco mais alto/perto?").catch(() => {});
+          continue;
+        }
         await saveUserMessage(transcription, m.waMessageId);
         sawOwnerText = true;
       } catch (e) {
@@ -144,8 +149,9 @@ export async function handleIncoming(messages: IncomingMessage[]): Promise<void>
     }
 
     if (m.type !== "text" || !m.text.trim()) {
+      const diag = m.text?.trim() ? ` Diagnóstico — ${m.text.trim()}` : "";
       await saveUserMessage(`[mensagem ${m.type} não suportada]`, m.waMessageId);
-      await deliver("Só consigo processar texto e áudio por enquanto. 🙂").catch(() => {});
+      await deliver(`Isso não chegou num formato que eu consiga processar.${diag}`).catch(() => {});
       continue;
     }
 

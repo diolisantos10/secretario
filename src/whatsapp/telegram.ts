@@ -257,7 +257,8 @@ async function toIncoming(u: any): Promise<IncomingMessage | null> {
 
   pushDebug({ at: new Date().toISOString(), kind: "unknown", fields: msgFields, detail: JSON.stringify(msg).slice(0, 200) });
   log.warn(`[telegram] update não reconhecido — campos: ${msgFields.join(", ")}`);
-  return { ...base, type: "unknown", text: "" };
+  // Embute os campos recebidos no texto para diagnóstico visível ao dono.
+  return { ...base, type: "unknown", text: msgFields.length ? `campos: ${msgFields.join(", ")}` : "" };
 }
 
 function chunk(text: string, size = TG_TEXT_LIMIT): string[] {
