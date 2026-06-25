@@ -29,6 +29,8 @@ const MANAGED = [
   "OWNER_WHATSAPP",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_OWNER_CHAT_ID",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
 ] as const;
 export type CredKey = (typeof MANAGED)[number];
 

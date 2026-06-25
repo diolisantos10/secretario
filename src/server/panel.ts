@@ -130,6 +130,7 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
         google: {
           configured: googleReady(),
           connected: calConnected,
+          redirectUri: (config.PUBLIC_URL || "") + "/oauth/google/callback",
         },
         whatsapp: {
           configured: metaReady(),
@@ -208,6 +209,16 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as { id?: string };
     if (!body.id) return reply.send({ ok: false, error: "Informe o id." });
     return reply.send({ ok: await cancelReminder(body.id) });
+  });
+
+  app.post("/painel/api/integrations/google", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { clientId?: string; clientSecret?: string };
+    const clientId = (body.clientId ?? "").trim();
+    const clientSecret = (body.clientSecret ?? "").trim();
+    if (!clientId || !clientSecret) return reply.send({ ok: false, error: "Informe o Client ID e o Client Secret." });
+    await setCredentials({ GOOGLE_CLIENT_ID: clientId, GOOGLE_CLIENT_SECRET: clientSecret });
+    return reply.send({ ok: true });
   });
 
   app.post("/painel/api/integrations/google/disconnect", async (req, reply) => {
@@ -631,9 +642,24 @@ function dashboardPage(): string {
             </div>
             <p class="int-desc">Agenda (ver/criar eventos, briefing diário) <b>e Gmail</b> (ler, resumir e enviar e-mails) pelo secretário. Uma autorização libera os dois.</p>
 
-            <!-- Not configured (env vars missing) -->
+            <!-- Not configured: form to enter Client ID + Secret -->
             <div id="g-not-configured">
-              <p class="muted" style="font-size:13px">Para habilitar, defina <code>GOOGLE_CLIENT_ID</code> e <code>GOOGLE_CLIENT_SECRET</code> nas variáveis de ambiente do Railway e faça um novo deploy.</p>
+              <details class="g-steps">
+                <summary>Como criar credenciais no Google Cloud</summary>
+                <ol class="steps-ol">
+                  <li>Acesse <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a> → crie ou selecione um projeto.</li>
+                  <li>Ative as APIs: <b>Google Calendar API</b> e <b>Gmail API</b> (menu Biblioteca).</li>
+                  <li>Em <b>APIs e Serviços › Credenciais</b>, clique em <b>+ Criar › ID do cliente OAuth 2.0</b>. Tipo: <b>Aplicativo da Web</b>.</li>
+                  <li>Adicione este URI de redirecionamento autorizado e salve:</li>
+                </ol>
+              </details>
+              <div class="copy-row" style="margin:6px 0 12px"><code id="g-redir-hint" style="font-size:12px">…</code><button class="cpbtn" type="button" onclick="copyText('g-redir-hint',this)">Copiar</button></div>
+              <form id="fGoogle" class="fg">
+                <div><label class="flabel">Client ID</label><input class="finp" id="g-client-id" placeholder="xxx.apps.googleusercontent.com"></div>
+                <div><label class="flabel">Client Secret</label><input class="finp" type="password" id="g-client-secret" placeholder="GOCSPX-..."></div>
+                <div class="err" id="g-err"></div>
+                <button class="btn btn-ggl btn-full">${GOOGLE_G}&nbsp;Salvar</button>
+              </form>
             </div>
 
             <!-- Ready to connect (env vars present, not yet authorized) -->
@@ -869,6 +895,7 @@ const DASH_JS = [
 
   // Google states
   "var gCard=document.getElementById('card-google');var gBadge=document.getElementById('g-badge');var gNoCfg=document.getElementById('g-not-configured');var gConn=document.getElementById('g-connect');var gOk=document.getElementById('g-connected');",
+  "var gRedir=document.getElementById('g-redir-hint');if(gRedir)gRedir.textContent=g.redirectUri||'(defina a PUBLIC_URL do serviço)';",
   "if(gBadge){if(g.connected){if(gCard)gCard.className='int-card ok-card';gBadge.className='int-badge ok';gBadge.textContent='Conectado ✓';if(gNoCfg)gNoCfg.style.display='none';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='';}else if(g.configured){if(gCard)gCard.className='int-card';gBadge.className='int-badge rdy';gBadge.textContent='Clique para entrar';if(gNoCfg)gNoCfg.style.display='none';if(gConn)gConn.style.display='';if(gOk)gOk.style.display='none';}else{if(gCard)gCard.className='int-card';gBadge.className='int-badge';gBadge.textContent='Não disponível';if(gNoCfg)gNoCfg.style.display='';if(gConn)gConn.style.display='none';if(gOk)gOk.style.display='none';}}",
 
   // WhatsApp: popula campos do método Meta e decide o método inicial.
@@ -949,6 +976,9 @@ const DASH_JS = [
   // Wiring — Telegram
   "document.getElementById('fTg').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('t-err');err.className='err';err.textContent='';var tk=document.getElementById('t-token').value.trim();if(!tk){err.textContent='Cole o token do BotFather.';return;}applyTg({state:'connecting'});api('/painel/api/integrations/telegram',{token:tk}).then(function(j){if(j.ok){document.getElementById('t-token').value='';toast('Bot conectado!');startTgPoll();pollTg();load();}else{err.className='err';err.textContent=j.error||'Falha ao conectar.';applyTg({state:'error',error:j.error});}}).catch(function(){err.textContent='Erro de rede.';});});",
   "['t-logout-w','t-logout-o'].forEach(function(id){var b=document.getElementById(id);if(b)b.addEventListener('click',function(){if(!confirm('Remover o bot do Telegram?'))return;api('/painel/api/integrations/telegram/disconnect',{}).then(function(){toast('Bot removido');stopTgPoll();applyTg({state:'idle'});load();});});});",
+
+  // Wiring — Google setup form (save Client ID + Secret)
+  "document.getElementById('fGoogle').addEventListener('submit',function(e){e.preventDefault();var err=document.getElementById('g-err');err.textContent='';var cid=document.getElementById('g-client-id').value.trim();var cs=document.getElementById('g-client-secret').value.trim();if(!cid||!cs){err.textContent='Informe o Client ID e o Client Secret.';return;}api('/painel/api/integrations/google',{clientId:cid,clientSecret:cs}).then(function(j){if(j.ok){document.getElementById('g-client-id').value='';document.getElementById('g-client-secret').value='';toast('Credenciais salvas! Agora clique em Entrar com Google.');load();}else{err.textContent=j.error||'Falha ao salvar.';}});});",
 
   // Wiring — Google disconnect
   "document.getElementById('gDisconnect').addEventListener('click',function(){if(!confirm('Desconectar a Agenda do Google?'))return;api('/painel/api/integrations/google/disconnect',{}).then(function(){toast('Google desconectado');load();});});",
