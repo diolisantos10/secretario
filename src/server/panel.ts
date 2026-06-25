@@ -12,7 +12,7 @@ import { listReminders, createReminder, cancelReminder, completeReminder } from 
 import { listToday, isConnected as calendarConnected } from "../services/calendar";
 import { allLists, setDone, archiveList, createList } from "../services/lists";
 import { allDashboards, findDashboard, archiveDashboard } from "../services/dashboards";
-import { runJobSearchNow } from "../scheduler/cron";
+import { runJobSearchNow, getJobSearchBrief, setJobSearchBrief } from "../scheduler/cron";
 import { runDirectTurn } from "../pipeline";
 import { testOpenAIKey } from "../services/transcription";
 import { testAnthropicKey } from "../brain/secretary";
@@ -409,6 +409,19 @@ export async function registerPanel(app: FastifyInstance): Promise<void> {
   app.post("/painel/api/jobs/run", async (req, reply) => {
     if (!guard(req, reply)) return;
     void runJobSearchNow().catch((e) => log.error("[painel] busca manual de vagas falhou", e));
+    return reply.send({ ok: true });
+  });
+
+  // Lê/grava o perfil que guia a busca diária de vagas.
+  app.get("/painel/api/jobs/brief", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    return reply.send({ ok: true, brief: await getJobSearchBrief() });
+  });
+  app.post("/painel/api/jobs/brief", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    const body = (req.body ?? {}) as { brief?: string };
+    if (!body.brief?.trim()) return reply.send({ ok: false, error: "Escreva o perfil de busca." });
+    await setJobSearchBrief(body.brief);
     return reply.send({ ok: true });
   });
 
@@ -963,6 +976,16 @@ function dashboardPage(): string {
           <a href="/painel/api/export" download class="btn btn-ghost btn-sm">⬇️ Baixar todo o contexto (.txt)</a>
         </div>
         <div class="card" style="margin-bottom:16px">
+          <div class="ctitle">Perfil para busca de vagas</div>
+          <p class="muted" style="margin:0 0 10px">É isto que guia a busca diária das 9h. Quanto mais afiado o perfil, melhores as vagas. Edite à vontade.</p>
+          <textarea class="finp" id="jobBrief" rows="6" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Carregando..."></textarea>
+          <div class="row" style="gap:8px;margin-top:10px">
+            <button type="button" id="btnSaveBrief" class="btn btn-pri btn-sm">Salvar perfil</button>
+            <button type="button" id="btnJobs2" class="btn btn-ghost btn-sm">💼 Testar busca agora</button>
+          </div>
+          <div id="briefMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
           <div class="ctitle">Chaves de API</div>
           <p class="muted" style="margin:0 0 12px">Cole aqui suas chaves. Elas ficam salvas no banco de dados, não no código.</p>
           <div id="apiKeyStatus" style="margin-bottom:10px"></div>
@@ -1038,7 +1061,7 @@ const DASH_JS = [
   "if(name==='lists')renderLists();",
   "if(name==='dashboards')renderDashboards();",
   "if(name==='integrations')renderIntegrations();",
-  "if(name==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();}",
+  "if(name==='settings'){renderApiKeyStatus();renderFacts();renderReminders();renderSAgenda();renderSUsage();loadJobBrief();}",
   "}",
 
   // Load & render
@@ -1174,6 +1197,11 @@ const DASH_JS = [
   "function testAnthropic(){var res=document.getElementById('anthropicTestResult');var btn=document.getElementById('btnTestAnthropic');if(res){res.style.color='var(--mut)';res.textContent='Testando a chave com a Anthropic...';}if(btn)btn.disabled=true;return api('/painel/api/config/test-anthropic',{}).then(function(j){if(btn)btn.disabled=false;if(!res)return;if(j.ok){res.style.color='var(--ok)';res.textContent='✓ Confirmado: a chave do Claude está no sistema e funcionando. O secretário pensa normalmente.';}else{res.style.color='var(--err)';res.textContent='✗ '+(j.error||'A chave não passou no teste.');}}).catch(function(){if(btn)btn.disabled=false;if(res){res.style.color='var(--err)';res.textContent='Erro de rede ao testar.';}});}",
   "document.getElementById('btnTestOpenai').addEventListener('click',testOpenai);",
   "document.getElementById('btnTestAnthropic').addEventListener('click',testAnthropic);",
+
+  // Wiring — perfil de busca de vagas
+  "function loadJobBrief(){var t=document.getElementById('jobBrief');if(!t||t.value.trim())return;fetch('/painel/api/jobs/brief').then(function(r){return r.json();}).then(function(j){if(j.ok&&!t.value.trim())t.value=j.brief||'';}).catch(function(){});}",
+  "var sb=document.getElementById('btnSaveBrief');if(sb)sb.addEventListener('click',function(){var t=document.getElementById('jobBrief');var m=document.getElementById('briefMsg');if(!t.value.trim()){if(m){m.style.color='var(--err)';m.textContent='Escreva o perfil.';}return;}api('/painel/api/jobs/brief',{brief:t.value}).then(function(j){if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?'Perfil salvo! A próxima busca usa ele.':(j.error||'Falha.');}});});",
+  "var bj2=document.getElementById('btnJobs2');if(bj2)bj2.addEventListener('click',function(){var m=document.getElementById('briefMsg');bj2.disabled=true;if(m){m.style.color='var(--mut)';m.textContent='Buscando vagas... chega no Telegram e no chat em ~1 min.';}api('/painel/api/jobs/run',{}).then(function(j){bj2.disabled=false;if(m){m.style.color=j.ok?'var(--ok)':'var(--err)';m.textContent=j.ok?'Busca disparada! Veja no Telegram/chat.':(j.error||'Falha.');}});});",
 
   // Wiring — Memory form
   "document.getElementById('fFact').addEventListener('submit',function(e){e.preventDefault();var k=document.getElementById('fkey').value.trim();var v=document.getElementById('fval').value.trim();if(!k||!v)return;api('/painel/api/memory',{category:document.getElementById('fcat').value.trim()||'geral',key:k,value:v}).then(function(){document.getElementById('fcat').value='';document.getElementById('fkey').value='';document.getElementById('fval').value='';load();});});",

@@ -16,7 +16,25 @@ import { composeProactive, composeWithSearch } from "../brain/secretary";
 import { todayKey, TZ } from "../util/datetime";
 
 const DEFAULT_JOB_BRIEF =
-  "Vagas 100% remotas que aceitem candidatos morando no Brasil, remuneração a partir de ~R$5.000/mês (ou equivalente em USD/EUR), que aceitem ou exijam inglês.";
+  "PERFIL: Diego de Oliveira — Gestor Comercial sênior, 20+ anos em varejo de moda/beleza premium. " +
+  "Experiência de gerência: Gerente da Loja Conceito Havaianas (Oscar Freire) na Alpargatas, Gerente da Sephora, " +
+  "Subgerente da Zara, Consultor Comercial na Arezzo&Co, e atualmente em transição. " +
+  "Forte em gestão de pessoas, liderança de equipe comercial, visual merchandising, gestão estratégica e analytics. " +
+  "Inglês B2 (avançado). Formação em Marketing (Anhembi Morumbi) e Teatro (Célia Helena) — também é ator com DRT, ótima comunicação. " +
+  "OBJETIVO: vaga 100% REMOTA (home office), seg–sex, remuneração a partir de ~R$5.000/mês (ou equivalente em USD/EUR — vagas internacionais bem-vindas). " +
+  "CARGOS-ALVO: gestão comercial/varejo remoto, customer success, account/key account manager, e-commerce, trade marketing, " +
+  "visual merchandising, atendimento e vendas bilíngue (PT-EN), e locução/apresentação remota. " +
+  "Priorizar vagas recentes que valorizem liderança, comunicação e inglês.";
+
+const JOB_BRIEF_KEY = "jobSearchBrief";
+
+/** Brief de busca de vagas: o que o dono salvou, ou o perfil padrão. */
+export async function getJobSearchBrief(): Promise<string> {
+  return (await getSetting(JOB_BRIEF_KEY)) || DEFAULT_JOB_BRIEF;
+}
+export async function setJobSearchBrief(text: string): Promise<void> {
+  await setSetting(JOB_BRIEF_KEY, (text || "").trim());
+}
 
 async function getSetting(key: string): Promise<string | null> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -64,7 +82,7 @@ async function sendDailyBriefing(): Promise<void> {
 
 /** Executa a busca de vagas e entrega o resultado. Compartilhada (auto + manual). */
 async function doJobSearch(): Promise<void> {
-  const brief = (await getSetting("jobSearchBrief")) || DEFAULT_JOB_BRIEF;
+  const brief = await getJobSearchBrief();
   const text = await composeWithSearch(
     `Hora da busca de vagas para ${config.OWNER_NAME}. ` +
       `Critérios: ${brief} ` +
