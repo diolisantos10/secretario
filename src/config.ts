@@ -31,7 +31,7 @@ const schema = z.object({
 
   // Claude (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5"),
   ANTHROPIC_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   ENABLE_WEB_SEARCH: z.coerce.boolean().default(true),
 

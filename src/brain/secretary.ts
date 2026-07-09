@@ -1,10 +1,12 @@
 /**
  * O cérebro: laço agêntico sobre a Messages API do Claude.
  *
- * Modelo: claude-opus-4-8 · thinking adaptativo · effort configurável ·
- * prompt caching no system · busca na web (web_search_20260209) + ferramentas custom.
- * O contexto dinâmico (data, memória, lembretes, agenda) entra como mensagem de
- * sistema no meio da conversa (recurso do Opus 4.8) — com fallback para modelos
+ * Modelo configurável via ANTHROPIC_MODEL (config.ts, padrão claude-haiku-4-5
+ * pelo custo) · thinking adaptado ao modelo · effort configurável · prompt
+ * caching no system · busca na web (versão com filtragem dinâmica nos modelos
+ * que suportam, básica nos demais) + ferramentas custom. O contexto dinâmico
+ * (data, memória, lembretes, agenda) entra como mensagem de sistema no meio da
+ * conversa nos modelos que suportam (hoje só Opus 4.8) — com fallback para os
  * que não suportam.
  */
 import Anthropic from "@anthropic-ai/sdk";
@@ -69,8 +71,16 @@ export async function testAnthropicKey(): Promise<{ ok: boolean; error?: string 
   }
 }
 
+/**
+ * A versão com filtragem dinâmica (web_search_20260209) só existe nos modelos
+ * Opus 4.6+, Sonnet 4.6+ e Fable/Mythos 5. No Haiku (e modelos mais antigos)
+ * ela dá erro 400 — usa-se a versão básica.
+ */
 function webSearchTool() {
-  return config.ENABLE_WEB_SEARCH ? [{ type: "web_search_20260209", name: "web_search" }] : [];
+  if (!config.ENABLE_WEB_SEARCH) return [];
+  const dynamicFiltering = /opus-4-[678]|sonnet-4-6|sonnet-5|fable-5|mythos-5/.test(config.ANTHROPIC_MODEL);
+  const type = dynamicFiltering ? "web_search_20260209" : "web_search_20250305";
+  return [{ type, name: "web_search" }];
 }
 
 function extractText(content: any[]): string {
