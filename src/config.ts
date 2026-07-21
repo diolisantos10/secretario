@@ -35,7 +35,10 @@ const schema = z.object({
   ANTHROPIC_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   ENABLE_WEB_SEARCH: z.coerce.boolean().default(true),
 
-  // Meta WhatsApp Cloud API
+  // Telegram Bot (via @BotFather)
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+
+  // Meta WhatsApp Cloud API (opcional — usar Telegram é recomendado)
   META_PHONE_NUMBER_ID: z.string().optional(),
   META_ACCESS_TOKEN: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
