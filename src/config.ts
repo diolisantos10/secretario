@@ -31,7 +31,9 @@ const schema = z.object({
 
   // Claude (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5"),
+  // Sonnet 4.6 é o default: melhor balanço custo/performance com tool use robusto
+  // (Haiku 4.5 tem limitações com streaming + tool use complexo; use manualmente se economizar é crítico)
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
   ANTHROPIC_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   ENABLE_WEB_SEARCH: z.coerce.boolean().default(true),
 

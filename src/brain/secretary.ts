@@ -231,6 +231,8 @@ export async function respond(attachments: Attachment[] = []): Promise<Secretary
   const history = await loadHistory();
   const contextText = await gatherContext();
 
+  // Apenas Opus 4.8 suporta system no meio da conversa com ferramentas
+  // Haiku e Sonnet usam fallback para evitar "container_id" errors
   let systemAsMessage = config.ANTHROPIC_MODEL.includes("opus-4-8");
   let messages = buildMessages(history, contextText, systemAsMessage, attachments);
 
